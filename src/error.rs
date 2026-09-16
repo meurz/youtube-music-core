@@ -22,14 +22,14 @@ pub enum Error {
     MediaValidation(String),
     #[error("lyrics are unavailable for this track")]
     LyricsUnavailable,
-    #[error("sign in and import a YouTube Music browser session first")]
+    #[error("sign in to YouTube Music first")]
     AuthenticationRequired,
-    #[error(
-        "YouTube rejected the selected browser session; sign in and import fresh request headers"
-    )]
+    #[error("YouTube rejected the selected session; sign in again")]
     AuthenticationRejected,
     #[error("credential storage failed: {0}")]
     CredentialStorage(String),
+    #[error("device authorization failed: {0}")]
+    OAuth(String),
 }
 
 #[derive(Serialize)]
@@ -53,6 +53,7 @@ impl Error {
             Self::AuthenticationRequired => "authentication_required",
             Self::AuthenticationRejected => "authentication_rejected",
             Self::CredentialStorage(_) => "credential_storage",
+            Self::OAuth(_) => "oauth",
         };
         ErrorInfo {
             code,

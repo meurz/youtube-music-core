@@ -1,13 +1,13 @@
-Browser-session authentication and personal YouTube Music libraries are now available in the Rust core, JSON CLI, and C ABI.
+Official Google device authorization is now the default login flow.
 
-- `auth login` guides browser sign-in; `auth import --browser-port PORT` imports directly from a local signed-in Chrome/Edge Music tab. Request-header/stdin/Netscape imports are also supported.
-- Import verifies the selected account before saving. `auth status`, `account`, `--profile`, `--anonymous`, and local `auth logout` manage account access.
-- Linux uses `pass`; Windows/macOS use a system credential-backed AES-256-GCM session vault. No plaintext fallback or Google password handling.
-- `library playlists|likes|songs|albums|artists|subscriptions` provides read-only access with explicit pagination. Use returned IDs with `browse` or `playlist`.
-- Browser partitioned Cookie ordering is preserved through exact request capture. Captured Authorization hashes are discarded, fresh signatures are generated per request, and account credentials stay isolated from anonymous VR/CDN streaming.
+- Run `ytmusic auth login --no-open`, open the printed `https://www.google.com/device` link, enter the code, and approve the account. No Google Cloud project or Cookie copying is required.
+- The core dynamically discovers YouTube TV's public client configuration, polls the official device-token endpoint, and stores the issued tokens securely. Access tokens refresh automatically; changed tokens are persisted by the CLI.
+- TV OAuth supports account verification, playlists, likes, albums, subscriptions, and playlist contents/pagination. TV cards are normalized into the existing models. Saved-library songs and library artists still require browser authentication; TV libraries may additionally include automatic Mixes and ordinary YouTube content.
+- Browser import remains available through `auth import` or `auth login --browser-port`. Existing encrypted browser profiles remain compatible.
+- OAuth tokens only reach authenticated TV requests. Public web catalog operations, VR playback, and CDN probes stay anonymous with an OAuth profile. Rust hosts can retrieve refreshed state for their own secure storage.
 
-Validation: 42 offline tests, formatting and clippy; a real Windows-browser session imported into the native Linux CLI, encrypted store round trip, all six library sections, three playlist contents, authenticated search, and anonymous VR streams returning HTTP 206. The real account had no library continuation; pagination and multi-account/brand selection are covered offline. See docs/protocol.md for platform and protocol limits.
+Validation: 50 offline tests, fmt/clippy; real official Google consent, matching account identity, 22 TV playlists, 15 likes, 16 subscriptions, empty albums, two playlist contents, and forced-expiry refresh with encrypted persistence. Public search and VR M4A HTTP 206 passed. Actual library pagination and multiple OAuth accounts were not available for live testing. Browser-session flows and platform storage were validated in 0.3.0.
 
-This is browser-session authentication, not Google OAuth. Sessions may expire and require re-import. Library writes, private-track playback, JavaScript signature/n deciphering, and PO-token generation remain unsupported or unverified. Rust Config literals gain `delegated_session_id`; existing JSON requests remain compatible.
+Compatibility: `auth login` now waits for official device authorization; the URL/code are on stderr and final JSON is on stdout. Rust Config literals gain the optional `oauth` field. The TV API can change or restrict this unofficial client's access. No JavaScript execution, Python, Node.js, or yt-dlp runtime is needed. Private-track playback, PO-token generation, and signature/n deciphering remain unimplemented or unverified.
 
 Native Linux x86_64/ARM64, Windows x86_64, and macOS Intel/Apple Silicon archives include the CLI, shared library, C header, documentation, license, and SHA-256 checksums. Linux requires a compatible glibc (2.39 or newer). macOS/Windows binaries are unsigned.
