@@ -1,0 +1,6 @@
+/target/
+/.local/
+/.env*
+*cookies*
+*.har
+*.log
