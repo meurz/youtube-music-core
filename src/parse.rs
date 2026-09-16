@@ -362,15 +362,22 @@ pub fn player(v: &Value) -> Result<Player> {
         };
         audio_streams.push(AudioStream {
             itag,
+            expires_at: url
+                .query_pairs()
+                .find_map(|(key, value)| (key == "expire").then(|| value.parse().ok()).flatten()),
             url: url.into(),
             mime_type: mime.into(),
             bitrate: number(&format["bitrate"]),
             content_length: number(&format["contentLength"]),
             audio_quality: format["audioQuality"].as_str().map(str::to_owned),
+            http_headers: Default::default(),
+            source_client: None,
+            verification: None,
         });
     }
     audio_streams.sort_by_key(|s| std::cmp::Reverse(s.bitrate.unwrap_or(0)));
     Ok(Player {
+        source_client: None,
         track,
         status,
         reason: v["playabilityStatus"]["reason"].as_str().map(str::to_owned),

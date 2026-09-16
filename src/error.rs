@@ -16,6 +16,10 @@ pub enum Error {
         "no direct audio URL; signature/n deciphering or additional player attestation is required"
     )]
     StreamResolutionRequired,
+    #[error("no verified audio stream: {0}")]
+    StreamUnavailable(String),
+    #[error("media validation failed: {0}")]
+    MediaValidation(String),
     #[error("lyrics are unavailable for this track")]
     LyricsUnavailable,
 }
@@ -35,6 +39,8 @@ impl Error {
             Self::Protocol(_) => "protocol",
             Self::Unplayable { .. } => "unplayable",
             Self::StreamResolutionRequired => "stream_resolution_required",
+            Self::StreamUnavailable(_) => "stream_unavailable",
+            Self::MediaValidation(_) => "media_validation",
             Self::LyricsUnavailable => "lyrics_unavailable",
         };
         ErrorInfo {

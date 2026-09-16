@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 use std::{
     io::Read,
+    sync::OnceLock,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -28,6 +29,7 @@ pub struct Config {
     pub proxy: Option<String>,
     pub timeout_seconds: u64,
     pub auth_user: u32,
+    pub playback_client: PlaybackClient,
 }
 
 impl Default for Config {
@@ -42,21 +44,23 @@ impl Default for Config {
             proxy: None,
             timeout_seconds: 30,
             auth_user: 0,
+            playback_client: PlaybackClient::Auto,
         }
     }
 }
 
 pub struct MusicClient {
-    http: Client,
-    config: Config,
+    pub(crate) http: Client,
+    pub(crate) config: Config,
+    pub(crate) signature_timestamp: OnceLock<u64>,
 }
 
-fn network(e: reqwest::Error) -> Error {
+pub(crate) fn network(e: reqwest::Error) -> Error {
     // Strip URLs, which can include continuation tokens or proxy credentials.
     Error::Network(e.without_url().to_string())
 }
 
-fn header(headers: &mut HeaderMap, key: &'static str, value: &str) -> Result<()> {
+pub(crate) fn header(headers: &mut HeaderMap, key: &'static str, value: &str) -> Result<()> {
     let mut value = HeaderValue::from_str(value)
         .map_err(|_| Error::InvalidInput(format!("invalid {key} header")))?;
     if key == "cookie" || key == "authorization" || key == "x-goog-visitor-id" {
@@ -92,7 +96,7 @@ pub(crate) fn config_string(html: &str, key: &str) -> Option<String> {
         .ok()
 }
 
-fn checked_response(response: reqwest::blocking::Response) -> Result<String> {
+pub(crate) fn checked_response(response: reqwest::blocking::Response) -> Result<String> {
     let status = response.status();
     if !status.is_success() {
         return Err(Error::Http(status.as_u16()));
@@ -125,7 +129,6 @@ impl MusicClient {
         }
         let mut builder = Client::builder()
             .user_agent(UA)
-            .default_headers(headers)
             .timeout(Duration::from_secs(config.timeout_seconds))
             .redirect(reqwest::redirect::Policy::none());
         if let Some(proxy) = &config.proxy {
@@ -136,18 +139,25 @@ impl MusicClient {
         }
         let http = builder.build().map_err(network)?;
         if config.client_version.is_none() {
-            let html = checked_response(http.get(ORIGIN).send().map_err(network)?)?;
+            let html =
+                checked_response(http.get(ORIGIN).headers(headers).send().map_err(network)?)?;
             config.client_version = Some(config_string(&html, "INNERTUBE_CLIENT_VERSION").ok_or_else(|| Error::Protocol("web client bootstrap failed; provide client_version if consent or regional restrictions block the homepage".into()))?);
             if config.visitor_data.is_none() {
                 config.visitor_data = config_string(&html, "VISITOR_DATA");
             }
         }
-        Ok(Self { http, config })
+        Ok(Self {
+            http,
+            config,
+            signature_timestamp: OnceLock::new(),
+        })
     }
 
-    fn post(&self, endpoint: &str, mut body: Value) -> Result<Value> {
+    pub(crate) fn post(&self, endpoint: &str, mut body: Value) -> Result<Value> {
         let mut client = json!({"clientName":"WEB_REMIX", "clientVersion":self.config.client_version, "hl":self.config.language, "gl":self.config.country});
         let mut headers = HeaderMap::new();
+        header(&mut headers, "origin", ORIGIN)?;
+        header(&mut headers, "referer", &format!("{ORIGIN}/"))?;
         header(&mut headers, "x-youtube-client-name", "67")?;
         header(
             &mut headers,
@@ -159,6 +169,7 @@ impl MusicClient {
             header(&mut headers, "x-goog-visitor-id", visitor)?;
         }
         if let Some(cookie) = &self.config.cookie {
+            header(&mut headers, "cookie", cookie)?;
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .map_err(|_| Error::Protocol("system clock before Unix epoch".into()))?
@@ -247,35 +258,12 @@ impl MusicClient {
         parse::page(&next)
     }
 
-    pub fn player(&self, video_id: &str) -> Result<Player> {
-        validate_video_id(video_id)?;
-        let mut body = json!({"videoId":video_id, "contentCheckOk":true, "racyCheckOk":true});
-        if let Some(token) = &self.config.po_token {
-            body["serviceIntegrityDimensions"] = json!({"poToken":token});
-        }
-        parse::player(&self.post("player", body)?)
-    }
-
     pub fn song(&self, video_id: &str) -> Result<Track> {
         let p = self.player(video_id)?;
         p.track.ok_or_else(|| Error::Unplayable {
             status: p.status,
             reason: p.reason.unwrap_or_else(|| "no track metadata".into()),
         })
-    }
-
-    pub fn stream(&self, video_id: &str) -> Result<AudioStream> {
-        let p = self.player(video_id)?;
-        if p.status != "OK" {
-            return Err(Error::Unplayable {
-                status: p.status,
-                reason: p.reason.unwrap_or_default(),
-            });
-        }
-        p.audio_streams
-            .into_iter()
-            .next()
-            .ok_or(Error::StreamResolutionRequired)
     }
 
     pub fn lyrics(&self, video_id: &str) -> Result<Lyrics> {

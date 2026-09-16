@@ -4,6 +4,7 @@ mod error;
 mod ffi;
 pub mod model;
 pub mod parse;
+mod playback;
 
 pub use client::{Config, ContinuationEndpoint, MusicClient};
 pub use error::{Error, ErrorInfo, Result};
@@ -36,6 +37,8 @@ pub enum Request {
     },
     Stream {
         video_id: String,
+        #[serde(default)]
+        format: model::AudioFormat,
     },
     Queue {
         video_id: String,
@@ -54,7 +57,7 @@ impl Request {
             Self::Continue { token, .. } => client::nonempty(token, "token"),
             Self::Song { video_id }
             | Self::Player { video_id }
-            | Self::Stream { video_id }
+            | Self::Stream { video_id, .. }
             | Self::Queue { video_id }
             | Self::Lyrics { video_id } => client::validate_video_id(video_id),
         }
@@ -73,7 +76,9 @@ impl MusicClient {
             }
             Request::Song { video_id } => serde_json::to_value(self.song(&video_id)?),
             Request::Player { video_id } => serde_json::to_value(self.player(&video_id)?),
-            Request::Stream { video_id } => serde_json::to_value(self.stream(&video_id)?),
+            Request::Stream { video_id, format } => {
+                serde_json::to_value(self.stream_format(&video_id, format)?)
+            }
             Request::Queue { video_id } => serde_json::to_value(self.queue(&video_id)?),
             Request::Lyrics { video_id } => serde_json::to_value(self.lyrics(&video_id)?),
         };

@@ -1,4 +1,34 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaybackClient {
+    #[default]
+    Auto,
+    AndroidVr,
+    WebRemix,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum AudioFormat {
+    #[default]
+    Any,
+    Mp4,
+    Webm,
+}
+
+impl AudioFormat {
+    pub(crate) fn matches(self, mime: &str) -> bool {
+        let container = mime.split(';').next().unwrap_or("").trim();
+        match self {
+            Self::Any => matches!(container, "audio/mp4" | "audio/webm"),
+            Self::Mp4 => container == "audio/mp4",
+            Self::Webm => container == "audio/webm",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "snake_case")]
@@ -82,10 +112,30 @@ pub struct AudioStream {
     pub bitrate: Option<u64>,
     pub content_length: Option<u64>,
     pub audio_quality: Option<String>,
+    /// Unix timestamp from the signed URL. Resolve again after expiry.
+    #[serde(default)]
+    pub expires_at: Option<u64>,
+    /// Public request headers for the media host; never contains account cookies.
+    #[serde(default)]
+    pub http_headers: BTreeMap<String, String>,
+    #[serde(default)]
+    pub source_client: Option<String>,
+    /// Present only after a bounded media GET succeeds and matches the container.
+    #[serde(default)]
+    pub verification: Option<StreamVerification>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamVerification {
+    pub status: u16,
+    pub bytes_read: usize,
+    pub content_type: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Player {
+    #[serde(default)]
+    pub source_client: Option<String>,
     pub track: Option<Track>,
     pub status: String,
     pub reason: Option<String>,

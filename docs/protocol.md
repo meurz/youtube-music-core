@@ -4,14 +4,14 @@
 
 The client bootstraps `https://music.youtube.com/` using a desktop browser User-Agent and reads the public `INNERTUBE_CLIENT_VERSION` and `VISITOR_DATA` configuration. Observed WEB_REMIX version on 2026-09-16: `1.20260913.16.00`. The version is discovered at runtime, not compiled into the library.
 
-POST requests go to `https://music.youtube.com/youtubei/v1/{endpoint}?prettyPrint=false`, with JSON `context.client` fields `clientName=WEB_REMIX`, `clientVersion`, `hl`, `gl`, and optional `visitorData`. Headers include Origin/Referer and client number `67`. These endpoints accepted requests without an API key during validation.
+Catalog POST requests go to `https://music.youtube.com/youtubei/v1/{endpoint}?prettyPrint=false`, with JSON `context.client` fields `clientName=WEB_REMIX`, `clientVersion`, `hl`, `gl`, and optional `visitorData`. Headers include Origin/Referer and client number `67`. These endpoints accepted requests without an API key during validation. Audio resolution additionally uses the anonymous Android VR player endpoint described below.
 
 | Operation | Endpoint | Main request fields |
 | --- | --- | --- |
 | Search | `search` | `query`, optional filter `params` |
 | Album / artist / playlist | `browse` | `browseId` (playlist IDs gain `VL`) |
 | Pagination | Original endpoint | `continuation` |
-| Song / player / stream | `player` | `videoId`, content checks, optional `serviceIntegrityDimensions.poToken` |
+| Song / player / stream | `player` | Profile-specific context, `videoId`, content checks; WEB_REMIX also uses signature timestamp and optional `serviceIntegrityDimensions.poToken` |
 | Queue | `next` | `videoId`, audio-only/persistent-panel flags; follows one returned automix playlist endpoint |
 | Lyrics | `next`, then `browse` | Finds the selectable lyrics tab and uses its `browseId` |
 
@@ -19,13 +19,41 @@ The parser recognizes responsive rows, two-row cards, queue videos, shelf/carous
 
 ## Authentication and playback boundary
 
-Optional Cookie headers are sent only to the fixed music origin; redirects are disabled. `SAPISID` (or a secure PAPISID fallback) signs `timestamp + space + cookie_value + space + origin` with SHA-1 to build `SAPISIDHASH`. Authorization is refreshed on every request. Header values are marked sensitive in the HTTP library. Config parsing errors do not echo submitted credentials.
+Optional Cookie headers are attached per request only to the fixed music origin. `SAPISID` (or a secure PAPISID fallback) signs `timestamp + space + cookie_value + space + origin` with SHA-1 to build `SAPISIDHASH`. Authorization is refreshed on every request. Header values are marked sensitive in the HTTP library. Config parsing errors do not echo submitted credentials. The shared HTTP transport has no default Cookie or Authorization header, so anonymous VR, watch-page bootstrap, and media requests do not inherit account credentials.
 
 Cookie sign-in, account index selection, and supplied PO tokens are not authenticated-session verified. There is no OAuth flow, cookie extraction, browser automation, token generation, player JS interpreter, DRM handling, or yt-dlp subprocess. Account library mutations, downloads, and audio decoding are outside this release.
 
-`player` separates metadata from playability: song metadata may remain available even when the player is blocked. Only HTTPS audio URLs without an `n` challenge are exposed as ready formats. Cipher-only and n-challenged formats increment `unresolved_audio_formats`. `stream` rejects non-OK playability and returns `stream_resolution_required` if no ready audio remains. Direct URLs are not automatically downloaded or checked against the media CDN; the caller must handle expiry, session/IP binding, and CDN errors. A successful player response alone does not prove end-to-end playback.
+`player` separates metadata from playability: song metadata may remain available even when the player is blocked. Only HTTPS audio URLs without an `n` challenge are exposed as candidates. Cipher-only and n-challenged formats increment `unresolved_audio_formats`. `player` does not probe URLs; `stream` does. If every profile fails, `stream_unavailable` includes profile/format diagnostics without signed URLs. Account and private-track access remain unverified.
 
-## Live validation — 2026-09-16
+## Native streaming — 0.2.0
+
+The first release's generic `UNPLAYABLE` response did not prove that all player profiles were blocked. Two request-level differences resolved it:
+
+1. WEB_REMIX requires `playbackContext.contentPlaybackContext.signatureTimestamp`. The watch page's public `STS` value was `20702` during validation. Discovering that value changed the same song's web player response from `UNPLAYABLE` to `OK`, with four ciphered audio formats. The timestamp is discovered dynamically and cached for the client lifetime.
+2. The native `ANDROID_VR` profile returned direct URLs when its version, User-Agent, and device context matched. The tested version is `1.65.10`, client number `28`, device `Oculus / Quest 3`, Android SDK `32`, OS `Android / 12L`. Its User-Agent is `com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip`. Requests go to `https://www.youtube.com/youtubei/v1/player`. This profile needs no JavaScript execution, signature timestamp, account cookie, or generated PO token for the public tracks tested. Client compatibility can change upstream.
+
+Automatic mode tries VR first and then WEB_REMIX. `player` returns the first OK response with direct candidates; if none exists it retains inspection metadata. `stream` checks each profile's candidates by bitrate, honoring `any` / `mp4` / `webm`. The selected profile appears in both player and audio results. URLs whose declared expiry is within 30 seconds are rejected.
+
+Each media probe requests `Range: bytes=0-4095` with the returned public User-Agent. It accepts HTTP 200/206, checks content type, validates the initial Content-Range when present, reads at most 4 KiB, and checks WebM EBML or MP4 `ftyp` bytes. A broken URL or unsupported container is skipped. There are at most eight candidate formats per profile and three redirects per candidate. Initial and redirect URLs must use HTTPS port 443, the Google video CDN domain, and `/videoplayback`; cookies are never forwarded. Error pages, malformed/truncated ranges, unexpected redirects, and container mismatches fail validation.
+
+The probe establishes that the beginning of the audio is accessible. Hosts still own decoding, seeking, later CDN errors, and re-resolution after URL expiry. Streaming requires the same effective network path when URLs are IP-bound; use the configured proxy consistently in the host.
+
+### Live streaming validation — 2026-09-16
+
+| Probe | Observed result |
+| --- | --- |
+| `4D7u5KF7SP8`, WebM | ANDROID_VR, itag 251, Opus, HTTP 206, 4,096 verified bytes |
+| `4D7u5KF7SP8`, MP4 | ANDROID_VR, itag 140, AAC/M4A, HTTP 206, 4,096 verified bytes |
+| `5NV6Rdv1a3I`, music video audio | ANDROID_VR, itag 251, HTTP 206 |
+| `m9SMT5ipbxk`, Japanese song | ANDROID_VR, itag 251, HTTP 206 |
+| WEB_REMIX inspection | OK with four unresolved ciphered audio formats after timestamp discovery |
+| Real media decode | 256 KiB samples of Opus, M4A, and Japanese audio each decoded for one second; FFmpeg exit 0 |
+
+One initial homepage request encountered a transient transport error; repeating the request succeeded. Transport retries are not implemented. Typical successful resolution in this environment took roughly 1.4–1.6 seconds including bootstrap, player request, and CDN probe. Timing is observational, not a performance guarantee. No signed media URLs, cookies, or audio samples are committed. FFmpeg is only a validation tool.
+
+The 25 offline tests include high-bitrate failure fallback, strict container selection, media response limits, malformed/truncated ranges, error pages, expired URLs, redirect host restrictions, and credential isolation.
+
+## Original catalog validation — 0.1.0, 2026-09-16
 
 Performed using the compiled Rust CLI from WSL/Linux, anonymous session, default `en` / `US` request context. YouTube selected the actual region based on network conditions; the country field does not override geolocation.
 
