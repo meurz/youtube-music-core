@@ -8,6 +8,8 @@ Catalog POST requests go to `https://music.youtube.com/youtubei/v1/{endpoint}?pr
 
 | Operation | Endpoint | Main request fields |
 | --- | --- | --- |
+| Account verification | `account/account_menu` | Context with selected account |
+| Personal library | `browse` | Library browseId and optional continuation |
 | Search | `search` | `query`, optional filter `params` |
 | Album / artist / playlist | `browse` | `browseId` (playlist IDs gain `VL`) |
 | Pagination | Original endpoint | `continuation` |
@@ -21,9 +23,23 @@ The parser recognizes responsive rows, two-row cards, queue videos, shelf/carous
 
 Optional Cookie headers are attached per request only to the fixed music origin. `SAPISID` (or a secure PAPISID fallback) signs `timestamp + space + cookie_value + space + origin` with SHA-1 to build `SAPISIDHASH`. Authorization is refreshed on every request. Header values are marked sensitive in the HTTP library. Config parsing errors do not echo submitted credentials. The shared HTTP transport has no default Cookie or Authorization header, so anonymous VR, watch-page bootstrap, and media requests do not inherit account credentials.
 
-Cookie sign-in, account index selection, and supplied PO tokens are not authenticated-session verified. There is no OAuth flow, cookie extraction, browser automation, token generation, player JS interpreter, DRM handling, or yt-dlp subprocess. Account library mutations, downloads, and audio decoding are outside this release.
+Browser-session sign-in and personal library reads are authenticated-session verified in 0.3.0. The CLI can import request headers or capture an exact same-origin request through an explicitly enabled local Chromium debugging port, then verify and securely save the session. There is no Google OAuth flow, password handling, token generation, player JS interpreter, DRM handling, or yt-dlp subprocess. Account library mutations, downloads, and audio decoding are outside this release.
 
-`player` separates metadata from playability: song metadata may remain available even when the player is blocked. Only HTTPS audio URLs without an `n` challenge are exposed as candidates. Cipher-only and n-challenged formats increment `unresolved_audio_formats`. `player` does not probe URLs; `stream` does. If every profile fails, `stream_unavailable` includes profile/format diagnostics without signed URLs. Account and private-track access remain unverified.
+`player` separates metadata from playability: song metadata may remain available even when the player is blocked. Only HTTPS audio URLs without an `n` challenge are exposed as candidates. Cipher-only and n-challenged formats increment `unresolved_audio_formats`. `player` does not probe URLs; `stream` does. If every profile fails, `stream_unavailable` includes profile/format diagnostics without signed URLs. Private-track playback remains unverified.
+
+## Account and library — 0.3.0
+
+The core accepts a `BrowserSession` and exposes account verification, auth status, and six read-only library sections. Cookie presence is insufficient: `account/account_menu` must return an `activeAccountHeaderRenderer`. Explicit logged-out responses and HTTP 401/403 become authentication rejection; unexpected layouts remain protocol errors. `x-goog-authuser` chooses the Google account index. Optional brand/channel selection adds `x-goog-pageid` and `context.user.onBehalfOfUser`. The CLI captures these from the selected Music tab and verifies that selection is unchanged during import.
+
+Library browse IDs are `FEmusic_liked_playlists`, `VLLM`, `FEmusic_liked_videos`, `FEmusic_liked_albums`, `FEmusic_library_corpus_track_artists`, and `FEmusic_library_corpus_artists`. Liked songs and saved library songs are distinct. Each library page verifies the account first, retains section continuations (including `gridContinuation`), and removes action tiles without dropping the first real playlist. Recognized empty-state messages are accepted; unknown empty layouts are errors.
+
+The CLI reads the Cookie header from a unique same-origin `/generate_204` request through `Network.requestWillBeSentExtraInfo`, matching both request ID and URL regardless of event order. This preserves actual browser partitioned-cookie selection; combining `Network.getCookies` entries was ambiguous for duplicate preferences. Conflicting signing-cookie duplicates are rejected. CDP HTTP/WebSocket access is restricted to the selected loopback port and bypasses proxies. Login/MFA stays in the browser.
+
+Session persistence is a host concern. The CLI uses `pass` on Linux, or a system credential-backed AES-256-GCM vault on Windows/macOS. The key is random and stored separately from the encrypted file, avoiding Windows credential-size limits. Nonces are random, the profile is authenticated as associated data, writes replace atomically, and decryption failures are explicit. Import saves only after remote verification. Logout deletes the local selected profile. API/library calls do not require the browser after import; expired sessions need re-import.
+
+Live validation on 2026-09-16 used a signed-in Windows Chrome tab through CDP and the native WSL/Linux CLI. Verified import, encrypted `pass` storage, a fresh-process auth status/account lookup, all six library sections, and contents of three returned playlists. The account returned 8 playlists, 13 likes, 3 saved songs, 5 library artists, and 16 subscriptions. Albums returned the explicit “No albums yet” empty state. No account identity, playlist names/IDs, cookies, or private response fixtures are committed. Account-backed search returned 20 songs; account-backed default streaming and explicit anonymous M4A streaming both used anonymous VR and returned HTTP 206.
+
+The tested account had no library continuation, so library pagination is covered offline. Multi-account/brand request selection and credential isolation are covered offline; only the currently selected real account was exercised. Windows/macOS vault code is compiled/tested by CI; live OS keychain integration requires a desktop session. No automatic session renewal or account-library write operations are implemented.
 
 ## Native streaming — 0.2.0
 

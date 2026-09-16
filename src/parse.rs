@@ -255,6 +255,7 @@ fn sections(v: &Value, out: &mut Vec<Section>) {
                 "playlistPanelRenderer",
                 "playlistPanelContinuation",
                 "gridRenderer",
+                "gridContinuation",
             ] {
                 if let Some(r) = m.get(key) {
                     let mut entries = Vec::new();
