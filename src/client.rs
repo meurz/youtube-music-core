@@ -29,6 +29,7 @@ pub struct Config {
     pub proxy: Option<String>,
     pub timeout_seconds: u64,
     pub auth_user: u32,
+    pub delegated_session_id: Option<String>,
     pub playback_client: PlaybackClient,
 }
 
@@ -44,6 +45,7 @@ impl Default for Config {
             proxy: None,
             timeout_seconds: 30,
             auth_user: 0,
+            delegated_session_id: None,
             playback_client: PlaybackClient::Auto,
         }
     }
@@ -75,6 +77,19 @@ pub(crate) fn cookie_hash(cookie: &str, timestamp: u64) -> Option<String> {
         .split(';')
         .filter_map(|s| s.trim().split_once('='))
         .collect();
+    // A request may legitimately contain duplicate partitioned preferences,
+    // but conflicting signing cookies must never select an arbitrary identity.
+    for name in ["SAPISID", "__Secure-3PAPISID", "__Secure-1PAPISID"] {
+        let mut values = pairs
+            .iter()
+            .filter(|(key, _)| *key == name)
+            .map(|(_, value)| value);
+        if let Some(first) = values.next() {
+            if values.any(|value| value != first) {
+                return None;
+            }
+        }
+    }
     let value = ["SAPISID", "__Secure-3PAPISID", "__Secure-1PAPISID"]
         .iter()
         .find_map(|name| {
@@ -116,6 +131,21 @@ impl MusicClient {
     /// Blocking client. Async hosts should call it on a dedicated blocking worker.
     /// Unless client_version is supplied, bootstraps the current web client first.
     pub fn new(mut config: Config) -> Result<Self> {
+        if config.auth_user > 99 {
+            return Err(Error::InvalidInput(
+                "auth_user must be between 0 and 99".into(),
+            ));
+        }
+        if let Some(id) = &config.delegated_session_id {
+            if id.is_empty()
+                || id.len() > 256
+                || !id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            {
+                return Err(Error::InvalidInput("invalid delegated session ID".into()));
+            }
+        }
         if config.timeout_seconds == 0 || config.timeout_seconds > 300 {
             return Err(Error::InvalidInput(
                 "timeout_seconds must be between 1 and 300".into(),
@@ -153,7 +183,11 @@ impl MusicClient {
         })
     }
 
-    pub(crate) fn post(&self, endpoint: &str, mut body: Value) -> Result<Value> {
+    fn web_request(
+        &self,
+        endpoint: &str,
+        mut body: Value,
+    ) -> Result<reqwest::blocking::RequestBuilder> {
         let mut client = json!({"clientName":"WEB_REMIX", "clientVersion":self.config.client_version, "hl":self.config.language, "gl":self.config.country});
         let mut headers = HeaderMap::new();
         header(&mut headers, "origin", ORIGIN)?;
@@ -182,16 +216,24 @@ impl MusicClient {
                     &self.config.auth_user.to_string(),
                 )?;
                 header(&mut headers, "x-origin", ORIGIN)?;
+                if let Some(id) = &self.config.delegated_session_id {
+                    header(&mut headers, "x-goog-pageid", id)?;
+                }
             }
         }
         body["context"] = json!({"client":client, "user":{"lockedSafetyMode":false}});
-        let response = self
+        if let Some(id) = &self.config.delegated_session_id {
+            body["context"]["user"]["onBehalfOfUser"] = id.clone().into();
+        }
+        Ok(self
             .http
             .post(format!("{ORIGIN}/youtubei/v1/{endpoint}?prettyPrint=false"))
             .headers(headers)
-            .json(&body)
-            .send()
-            .map_err(network)?;
+            .json(&body))
+    }
+
+    pub(crate) fn post(&self, endpoint: &str, body: Value) -> Result<Value> {
+        let response = self.web_request(endpoint, body)?.send().map_err(network)?;
         let value: Value = serde_json::from_str(&checked_response(response)?)
             .map_err(|_| Error::Protocol("API returned invalid JSON".into()))?;
         if let Some(error) = value.get("error") {
@@ -329,6 +371,38 @@ pub(crate) fn validate_video_id(id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn web_account_selection_is_signed_and_transport_has_no_default_credentials() {
+        let client = MusicClient::new(Config {
+            client_version: Some("test".into()),
+            cookie: Some("SAPISID=synthetic".into()),
+            auth_user: 2,
+            delegated_session_id: Some("12345".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        let request = client
+            .web_request("browse", json!({"browseId":"FEmusic_liked_playlists"}))
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(request.url().host_str(), Some("music.youtube.com"));
+        assert_eq!(request.headers()["x-goog-authuser"], "2");
+        assert_eq!(request.headers()["x-goog-pageid"], "12345");
+        assert!(request.headers()["cookie"].is_sensitive());
+        assert!(request.headers()["authorization"].is_sensitive());
+        assert!(request.headers()["authorization"]
+            .to_str()
+            .unwrap()
+            .starts_with("SAPISIDHASH "));
+        let body: Value =
+            serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
+        assert_eq!(body["context"]["user"]["onBehalfOfUser"], "12345");
+        let anonymous = client.http.get("https://www.youtube.com/").build().unwrap();
+        assert!(!anonymous.headers().contains_key("cookie"));
+        assert!(!anonymous.headers().contains_key("authorization"));
+    }
 
     #[test]
     fn cookie_signing_has_known_digest_and_fallback() {

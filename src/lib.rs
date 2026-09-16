@@ -1,7 +1,9 @@
 //! Native, blocking YouTube Music client. No browser, Python, or yt-dlp runtime.
+pub mod auth;
 mod client;
 mod error;
 mod ffi;
+pub mod library;
 pub mod model;
 pub mod parse;
 mod playback;
@@ -14,6 +16,13 @@ use serde_json::{json, Value};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
+    AuthStatus,
+    Account,
+    Library {
+        section: library::LibrarySection,
+        #[serde(default)]
+        continuation: Option<String>,
+    },
     Search {
         query: String,
         #[serde(default)]
@@ -51,6 +60,11 @@ pub enum Request {
 impl Request {
     pub fn validate(&self) -> Result<()> {
         match self {
+            Self::AuthStatus | Self::Account => Ok(()),
+            Self::Library { continuation, .. } => continuation
+                .as_deref()
+                .map(|token| client::nonempty(token, "continuation"))
+                .unwrap_or(Ok(())),
             Self::Search { query, .. } => client::nonempty(query, "query"),
             Self::Browse { browse_id } => client::nonempty(browse_id, "browse_id"),
             Self::Playlist { playlist_id } => client::nonempty(playlist_id, "playlist_id"),
@@ -68,6 +82,12 @@ impl MusicClient {
     pub fn execute(&self, request: Request) -> Result<Value> {
         request.validate()?;
         let value = match request {
+            Request::AuthStatus => serde_json::to_value(self.auth_status()?),
+            Request::Account => serde_json::to_value(self.account()?),
+            Request::Library {
+                section,
+                continuation,
+            } => serde_json::to_value(self.library(section, continuation.as_deref())?),
             Request::Search { query, filter } => serde_json::to_value(self.search(&query, filter)?),
             Request::Browse { browse_id } => serde_json::to_value(self.browse(&browse_id)?),
             Request::Playlist { playlist_id } => serde_json::to_value(self.playlist(&playlist_id)?),

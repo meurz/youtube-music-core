@@ -1,13 +1,13 @@
-Native audio streaming is now implemented.
+Browser-session authentication and personal YouTube Music libraries are now available in the Rust core, JSON CLI, and C ABI.
 
-- `ytmusic stream VIDEO_ID` resolves through the Android VR player profile, validates a bounded CDN byte range, and returns the best working audio URL.
-- `--format mp4` selects AAC/M4A; `--format webm` selects Opus. Failed formats fall back within the requested container, followed by a WEB_REMIX profile fallback.
-- Results include public playback headers, source client, URL expiry, and media verification details. Account cookies are isolated from anonymous player and CDN requests.
-- WEB_REMIX requests now discover the current signature timestamp; `playback_client` configuration can force either profile.
-- Rust, JSON CLI, and C ABI share the resolver. Existing JSON stream requests still work; Rust `Request::Stream` constructors now need `format`.
+- `auth login` guides browser sign-in; `auth import --browser-port PORT` imports directly from a local signed-in Chrome/Edge Music tab. Request-header/stdin/Netscape imports are also supported.
+- Import verifies the selected account before saving. `auth status`, `account`, `--profile`, `--anonymous`, and local `auth logout` manage account access.
+- Linux uses `pass`; Windows/macOS use a system credential-backed AES-256-GCM session vault. No plaintext fallback or Google password handling.
+- `library playlists|likes|songs|albums|artists|subscriptions` provides read-only access with explicit pagination. Use returned IDs with `browse` or `playlist`.
+- Browser partitioned Cookie ordering is preserved through exact request capture. Captured Authorization hashes are discarded, fresh signatures are generated per request, and account credentials stay isolated from anonymous VR/CDN streaming.
 
-Validation: 25 offline tests; real English audio, official music-video audio, and Japanese music streams returned HTTP 206. Opus and M4A samples decoded successfully for one second using FFmpeg (validation only, not a runtime dependency). Full-track playback was not tested.
+Validation: 42 offline tests, formatting and clippy; a real Windows-browser session imported into the native Linux CLI, encrypted store round trip, all six library sections, three playlist contents, authenticated search, and anonymous VR streams returning HTTP 206. The real account had no library continuation; pagination and multi-account/brand selection are covered offline. See docs/protocol.md for platform and protocol limits.
 
-Player JavaScript signature/n deciphering and PO-token generation remain unsupported. The anonymous Android VR profile avoids those requirements for the public tracks tested; it is not a guarantee against region, account, or anti-bot restrictions. See docs/protocol.md.
+This is browser-session authentication, not Google OAuth. Sessions may expire and require re-import. Library writes, private-track playback, JavaScript signature/n deciphering, and PO-token generation remain unsupported or unverified. Rust Config literals gain `delegated_session_id`; existing JSON requests remain compatible.
 
 Native Linux x86_64/ARM64, Windows x86_64, and macOS Intel/Apple Silicon archives include the CLI, shared library, C header, documentation, license, and SHA-256 checksums. Linux requires a compatible glibc (2.39 or newer). macOS/Windows binaries are unsigned.
