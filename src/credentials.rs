@@ -3,7 +3,7 @@ use std::{
     io::{Read, Write},
     process::{Command, Stdio},
 };
-use youtube_music_core::{auth::BrowserSession, Error, Result};
+use youtube_music_core::{auth::Session, Error, Result};
 use zeroize::Zeroizing;
 
 const MAX_SECRET: u64 = 1024 * 1024;
@@ -80,7 +80,7 @@ impl SessionStore {
         Ok(root.join(format!("{}.gpg", self.pass_key())))
     }
 
-    pub fn load(&self) -> Result<Option<BrowserSession>> {
+    pub fn load(&self) -> Result<Option<Session>> {
         let bytes = match self.kind {
             StoreKind::Pass => {
                 if !self
@@ -130,13 +130,13 @@ impl SessionStore {
         if bytes.is_empty() {
             return Err(storage("saved profile is empty; import a new session"));
         }
-        let session: BrowserSession = serde_json::from_slice(&bytes)
+        let session: Session = serde_json::from_slice(&bytes)
             .map_err(|_| storage("saved profile is invalid; import a new session"))?;
         session.validate()?;
         Ok(Some(session))
     }
 
-    pub fn save(&self, session: &BrowserSession) -> Result<()> {
+    pub fn save(&self, session: &Session) -> Result<()> {
         session.validate()?;
         let bytes = Zeroizing::new(
             serde_json::to_vec(session).map_err(|_| storage("cannot encode the session"))?,

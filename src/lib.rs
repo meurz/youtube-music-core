@@ -5,6 +5,7 @@ mod error;
 mod ffi;
 pub mod library;
 pub mod model;
+pub mod oauth;
 pub mod parse;
 mod playback;
 
