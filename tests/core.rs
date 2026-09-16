@@ -54,6 +54,8 @@ fn only_ready_audio_urls_are_exposed() {
         ]}})).unwrap();
     assert_eq!(p.audio_streams.len(), 2);
     assert_eq!(p.audio_streams[0].itag, 251);
+    assert_eq!(p.audio_streams[1].expires_at, Some(123));
+    assert!(p.audio_streams[0].verification.is_none());
     assert_eq!(p.unresolved_audio_formats, 3);
     assert_eq!(p.expires_in_seconds, Some(3600));
 }
@@ -133,6 +135,9 @@ fn invalid_calls_fail_before_network_and_do_not_echo_secrets() {
 
 #[test]
 fn request_validation_is_strict() {
+    let legacy: Request =
+        serde_json::from_value(json!({"op":"stream","video_id":"4D7u5KF7SP8"})).unwrap();
+    assert!(legacy.validate().is_ok());
     assert!(serde_json::from_value::<Request>(
         json!({"op":"song","video_id":"5NV6Rdv1a3I","typo":true})
     )

@@ -44,8 +44,12 @@ enum Command {
     Song { video_id: String },
     /// Inspect playback status and direct audio formats.
     Player { video_id: String },
-    /// Return the highest-bitrate direct audio URL; fail if attestation/deciphering is needed.
-    Stream { video_id: String },
+    /// Resolve audio and verify CDN bytes. Pass --format mp4 for an M4A-compatible stream.
+    Stream {
+        video_id: String,
+        #[arg(long, value_enum, default_value = "any")]
+        format: youtube_music_core::model::AudioFormat,
+    },
     /// Fetch the playback queue and recommendations.
     Queue { video_id: String },
     /// Fetch plain lyrics when available in this region/session.
@@ -76,8 +80,9 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
         Command::Player { video_id } => Request::Player {
             video_id: video_id.clone(),
         },
-        Command::Stream { video_id } => Request::Stream {
+        Command::Stream { video_id, format } => Request::Stream {
             video_id: video_id.clone(),
+            format: *format,
         },
         Command::Queue { video_id } => Request::Queue {
             video_id: video_id.clone(),
