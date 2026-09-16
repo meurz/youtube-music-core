@@ -1,0 +1,90 @@
+{
+  "playabilityStatus": {
+    "status": "UNPLAYABLE",
+    "reason": "Video unavailable",
+    "errorScreen": {
+      "playerErrorMessageRenderer": {
+        "subreason": {
+          "runs": [
+            {
+              "text": "The page needs to be reloaded."
+            }
+          ]
+        },
+        "reason": {
+          "runs": [
+            {
+              "text": "The page needs to be reloaded."
+            }
+          ]
+        },
+        "proceedButton": {
+          "buttonRenderer": {
+            "style": "STYLE_PRIMARY",
+            "isDisabled": false,
+            "text": {
+              "runs": [
+                {
+                  "text": "Reload"
+                }
+              ]
+            },
+            "command": {
+              "signalAction": {
+                "signal": "RELOAD_PAGE"
+              }
+            }
+          }
+        },
+        "thumbnail": {
+          "thumbnails": [
+            {
+              "url": "//s.ytimg.com/yts/img/meh7-vflGevej7.png",
+              "width": 140,
+              "height": 100
+            }
+          ]
+        },
+        "icon": {
+          "iconType": "ERROR_OUTLINE"
+        }
+      }
+    },
+    "contextParams": "Q0FFU0FnZ0I="
+  },
+  "videoDetails": {
+    "videoId": "5NV6Rdv1a3I",
+    "title": "Get Lucky (Official Audio)",
+    "lengthSeconds": "249",
+    "channelId": "UCKHFvArwRwQU2VbRjMpaVGw",
+    "isOwnerViewing": false,
+    "isCrawlable": true,
+    "thumbnail": {
+      "thumbnails": [
+        {
+          "url": "https://i.ytimg.com/vi/5NV6Rdv1a3I/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AOn4CLD3Jn9f71Ngg4yMrNJUPudEQUOZwg",
+          "width": 400,
+          "height": 225
+        },
+        {
+          "url": "https://i.ytimg.com/vi/5NV6Rdv1a3I/hq720.jpg?sqp=-oaymwEXCKAGEMIDIAQqCwjVARCqCBh4INgESFo&rs=AOn4CLDmUwxNmkYcgm92PLYXZymFZcl2gA",
+          "width": 800,
+          "height": 450
+        },
+        {
+          "url": "https://i.ytimg.com/vi/5NV6Rdv1a3I/hq720.jpg?sqp=-oaymwEXCNUGEOADIAQqCwjVARCqCBh4INgESFo&rs=AOn4CLB8xT7wDtbdmWF_4e6Yxq5vD_1k4A",
+          "width": 853,
+          "height": 480
+        }
+      ]
+    },
+    "allowRatings": true,
+    "viewCount": "876633709",
+    "author": "Daft Punk",
+    "isPrivate": false,
+    "isUnpluggedCorpus": false,
+    "musicVideoType": "MUSIC_VIDEO_TYPE_OMV",
+    "isLiveContent": false,
+    "isTvfilmVideo": false
+  }
+}

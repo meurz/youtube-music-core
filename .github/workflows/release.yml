@@ -1,0 +1,73 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - os: macos-15
+            target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.91.1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - name: Package native executable and library
+        shell: bash
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p dist/package
+          cp README.md LICENSE dist/package/
+          cp -r include docs examples dist/package/
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            cp target/release/ytmusic.exe target/release/youtube_music_core.dll dist/package/
+            target/release/ytmusic.exe --version
+          elif [[ "$RUNNER_OS" == macOS ]]; then
+            cp target/release/ytmusic target/release/libyoutube_music_core.dylib dist/package/
+            target/release/ytmusic --version
+          else
+            cp target/release/ytmusic target/release/libyoutube_music_core.so dist/package/
+            target/release/ytmusic --version
+          fi
+          tar -czf "dist/ytmusic-${RELEASE_TARGET}.tar.gz" -C dist/package .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ytmusic-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum *.tar.gz > SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" dist/*.tar.gz dist/SHA256SUMS --verify-tag --title "$RELEASE_TAG" --notes-file docs/release-notes.md

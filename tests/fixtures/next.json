@@ -1,0 +1,141 @@
+{
+  "contents": {
+    "playlistPanelRenderer": {
+      "contents": [
+        {
+          "playlistPanelVideoRenderer": {
+            "title": {
+              "runs": [
+                {
+                  "text": "Get Lucky (Official Audio) (feat. Pharrell Williams & Nile Rodgers)"
+                }
+              ]
+            },
+            "longBylineText": {
+              "runs": [
+                {
+                  "text": "Daft Punk",
+                  "navigationEndpoint": {
+                    "browseEndpoint": {
+                      "browseId": "UCRr1xG_2WIDs18a6cIiCxeA",
+                      "browseEndpointContextSupportedConfigs": {
+                        "browseEndpointContextMusicConfig": {
+                          "pageType": "MUSIC_PAGE_TYPE_ARTIST"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "text": " • "
+                },
+                {
+                  "text": "876M views"
+                },
+                {
+                  "text": " • "
+                },
+                {
+                  "text": "5.4M likes"
+                }
+              ]
+            },
+            "thumbnail": {
+              "thumbnails": [
+                {
+                  "url": "https://i.ytimg.com/vi/5NV6Rdv1a3I/hqdefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCggAEOADGC0guwJIWg&rs=AMzJL3mvsP8mFDRro1d2OpZBLOyPo9fHxA",
+                  "width": 400,
+                  "height": 225
+                },
+                {
+                  "url": "https://i.ytimg.com/vi/5NV6Rdv1a3I/hq720.jpg?sqp=-oaymwEKCKAGEMIDIABIWg&rs=AMzJL3lJswswkp9oMkQnzpawS-ms0dNXng",
+                  "width": 800,
+                  "height": 450
+                },
+                {
+                  "url": "https://i.ytimg.com/vi/5NV6Rdv1a3I/hq720.jpg?sqp=-oaymwEKCNUGEN8DIABIWg&rs=AMzJL3kWp73LkZiWlHm7uSS6X8A7WatGsg",
+                  "width": 853,
+                  "height": 479
+                }
+              ]
+            },
+            "lengthText": {
+              "runs": [
+                {
+                  "text": "4:09"
+                }
+              ]
+            },
+            "selected": true,
+            "navigationEndpoint": {
+              "watchEndpoint": {
+                "videoId": "5NV6Rdv1a3I",
+                "params": "OAHyAQIIAeoECzVOVjZSZHYxYTNJ",
+                "watchEndpointMusicSupportedConfigs": {
+                  "watchEndpointMusicConfig": {
+                    "hasPersistentPlaylistPanel": true,
+                    "musicVideoType": "MUSIC_VIDEO_TYPE_OMV"
+                  }
+                }
+              }
+            },
+            "videoId": "5NV6Rdv1a3I",
+            "shortBylineText": {
+              "runs": [
+                {
+                  "text": "Daft Punk"
+                }
+              ]
+            },
+            "canReorder": true,
+            "queueNavigationEndpoint": {
+              "queueAddEndpoint": {
+                "queueTarget": {
+                  "videoId": "5NV6Rdv1a3I"
+                },
+                "queueInsertPosition": "INSERT_AT_END",
+                "params": "Q0FJJTNE"
+              }
+            }
+          }
+        },
+        {
+          "automixPreviewVideoRenderer": {
+            "content": {
+              "automixPlaylistVideoRenderer": {
+                "navigationEndpoint": {
+                  "watchPlaylistEndpoint": {
+                    "playlistId": "RDAMVM5NV6Rdv1a3I",
+                    "params": "wAEB8gECeAHqBAs1TlY2UmR2MWEzSQ%3D%3D"
+                  }
+                },
+                "automixMode": "AUTOMIX_MODE_DEFAULT_ON"
+              }
+            }
+          }
+        }
+      ],
+      "isInfinite": false,
+      "shuffleToggleButton": {
+        "toggleButtonRenderer": {
+          "defaultIcon": {
+            "iconType": "MUSIC_SHUFFLE"
+          },
+          "defaultServiceEndpoint": {
+            "watchPlaylistEndpoint": {
+              "params": "wAEB8gECKAE%3D"
+            }
+          },
+          "toggledIcon": {
+            "iconType": "MUSIC_SHUFFLE"
+          },
+          "toggledServiceEndpoint": {
+            "watchPlaylistEndpoint": {
+              "params": "wAEB"
+            }
+          }
+        }
+      }
+    }
+  }
+}
