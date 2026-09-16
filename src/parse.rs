@@ -419,9 +419,22 @@ pub fn tv_page(value: &Value) -> Result<Page> {
                     let duration = find(header, "thumbnailOverlayTimeStatusRenderer")
                         .map(|r| r["text"].clone())
                         .unwrap_or(Value::Null);
+                    let mut endpoint = tile["onSelectCommand"].clone();
+                    if tile["contentType"] == "TILE_CONTENT_TYPE_PLAYLIST"
+                        && endpoint["browseEndpoint"].is_null()
+                    {
+                        if let Some(id) = endpoint["watchEndpoint"]["playlistId"].as_str() {
+                            let browse_id = if id.starts_with("VL") {
+                                id.to_owned()
+                            } else {
+                                format!("VL{id}")
+                            };
+                            endpoint["browseEndpoint"] = serde_json::json!({"browseId":browse_id,"browseEndpointContextSupportedConfigs":{"browseEndpointContextMusicConfig":{"pageType":"MUSIC_PAGE_TYPE_PLAYLIST"}}});
+                        }
+                    }
                     return serde_json::json!({"musicTwoRowItemRenderer":{
                         "title":metadata["title"],"subtitle":metadata["lines"],
-                        "navigationEndpoint":tile["onSelectCommand"],"thumbnail":header["thumbnail"],"lengthText":duration
+                        "navigationEndpoint":endpoint,"thumbnail":header["thumbnail"],"lengthText":duration
                     }});
                 }
                 let mut result = serde_json::Map::new();

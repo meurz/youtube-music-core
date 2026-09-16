@@ -178,3 +178,15 @@ fn tv_tiles_preserve_tracks_metadata_pagination_and_selected_tab_only() {
         Some("synthetic-next")
     );
 }
+
+#[test]
+fn tv_playlists_with_watch_endpoints_keep_their_browse_identity() {
+    let page=parse::tv_page(&json!({"contents":{"gridRenderer":{"items":[{"tileRenderer":{
+        "contentType":"TILE_CONTENT_TYPE_PLAYLIST","metadata":{"tileMetadataRenderer":{"title":{"simpleText":"Synthetic Mix"}}},
+        "onSelectCommand":{"watchEndpoint":{"videoId":"4D7u5KF7SP8","playlistId":"RDsynthetic"}}
+    }}]}}})).unwrap();
+    let item = &page.sections[0].items[0];
+    assert_eq!(item.kind, "playlist");
+    assert_eq!(item.browse_id.as_deref(), Some("VLRDsynthetic"));
+    assert_eq!(item.video_id.as_deref(), Some("4D7u5KF7SP8"));
+}
