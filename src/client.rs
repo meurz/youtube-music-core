@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 use std::{
     io::Read,
-    sync::OnceLock,
+    sync::{Mutex, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -25,6 +25,7 @@ pub struct Config {
     pub client_version: Option<String>,
     pub visitor_data: Option<String>,
     pub cookie: Option<String>,
+    pub oauth: Option<crate::oauth::OAuthSession>,
     pub po_token: Option<String>,
     pub proxy: Option<String>,
     pub timeout_seconds: u64,
@@ -41,6 +42,7 @@ impl Default for Config {
             client_version: None,
             visitor_data: None,
             cookie: None,
+            oauth: None,
             po_token: None,
             proxy: None,
             timeout_seconds: 30,
@@ -55,6 +57,8 @@ pub struct MusicClient {
     pub(crate) http: Client,
     pub(crate) config: Config,
     pub(crate) signature_timestamp: OnceLock<u64>,
+    oauth: Mutex<Option<crate::oauth::OAuthSession>>,
+    tv_version: OnceLock<String>,
 }
 
 pub(crate) fn network(e: reqwest::Error) -> Error {
@@ -131,6 +135,15 @@ impl MusicClient {
     /// Blocking client. Async hosts should call it on a dedicated blocking worker.
     /// Unless client_version is supplied, bootstraps the current web client first.
     pub fn new(mut config: Config) -> Result<Self> {
+        if let Some(oauth) = &config.oauth {
+            oauth.validate()?;
+            if config.cookie.is_some()
+                || config.auth_user != 0
+                || config.delegated_session_id.is_some()
+            {
+                return Err(Error::InvalidInput("OAuth selects its own account; do not combine it with browser credentials or account overrides".into()));
+            }
+        }
         if config.auth_user > 99 {
             return Err(Error::InvalidInput(
                 "auth_user must be between 0 and 99".into(),
@@ -178,9 +191,31 @@ impl MusicClient {
         }
         Ok(Self {
             http,
+            oauth: Mutex::new(config.oauth.clone()),
+            tv_version: OnceLock::new(),
             config,
             signature_timestamp: OnceLock::new(),
         })
+    }
+
+    /// Return updated OAuth state for host-owned secure persistence after calls.
+    pub fn oauth_session(&self) -> Result<Option<crate::oauth::OAuthSession>> {
+        self.oauth
+            .lock()
+            .map(|session| session.clone())
+            .map_err(|_| Error::Protocol("OAuth session lock failed".into()))
+    }
+
+    fn oauth_access_token(&self) -> Result<Option<String>> {
+        let mut state = self
+            .oauth
+            .lock()
+            .map_err(|_| Error::Protocol("OAuth session lock failed".into()))?;
+        if let Some(session) = state.as_mut() {
+            session.refresh_if_needed(&self.http)?;
+            return Ok(Some(session.access_token.clone()));
+        }
+        Ok(None)
     }
 
     fn web_request(
@@ -232,6 +267,56 @@ impl MusicClient {
             .json(&body))
     }
 
+    fn tv_request(
+        &self,
+        endpoint: &str,
+        mut body: Value,
+    ) -> Result<reqwest::blocking::RequestBuilder> {
+        const TV: &str = "https://www.youtube.com";
+        const TV_UA: &str = "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version";
+        let token = self
+            .oauth_access_token()?
+            .ok_or(Error::AuthenticationRequired)?;
+        if self.tv_version.get().is_none() {
+            let html = checked_response(
+                self.http
+                    .get(format!("{TV}/tv"))
+                    .header("User-Agent", TV_UA)
+                    .send()
+                    .map_err(network)?,
+            )?;
+            let version = config_string(&html, "INNERTUBE_CLIENT_VERSION")
+                .ok_or_else(|| Error::Protocol("TV client version is missing".into()))?;
+            let _ = self.tv_version.set(version);
+        }
+        body["context"] = json!({"client":{"clientName":"TVHTML5","clientVersion":self.tv_version.get(),"hl":self.config.language,"gl":self.config.country},"user":{"lockedSafetyMode":false}});
+        let mut headers = HeaderMap::new();
+        header(&mut headers, "authorization", &format!("Bearer {token}"))?;
+        header(&mut headers, "user-agent", TV_UA)?;
+        Ok(self
+            .http
+            .post(format!("{TV}/youtubei/v1/{endpoint}?prettyPrint=false"))
+            .headers(headers)
+            .json(&body))
+    }
+
+    pub(crate) fn account_post(&self, endpoint: &str, body: Value) -> Result<Value> {
+        if self.config.oauth.is_some() {
+            let response = self.tv_request(endpoint, body)?.send().map_err(network)?;
+            return serde_json::from_str(&checked_response(response)?)
+                .map_err(|_| Error::Protocol("TV API returned invalid JSON".into()));
+        }
+        self.post(endpoint, body)
+    }
+
+    pub(crate) fn account_page(&self, value: &Value) -> Result<Page> {
+        if self.config.oauth.is_some() {
+            parse::tv_page(value)
+        } else {
+            parse::page(value)
+        }
+    }
+
     pub(crate) fn post(&self, endpoint: &str, body: Value) -> Result<Value> {
         let response = self.web_request(endpoint, body)?.send().map_err(network)?;
         let value: Value = serde_json::from_str(&checked_response(response)?)
@@ -258,7 +343,7 @@ impl MusicClient {
     /// A browse ID can identify an album, artist, playlist, or home feed.
     pub fn browse(&self, browse_id: &str) -> Result<Page> {
         nonempty(browse_id, "browse_id")?;
-        parse::page(&self.post("browse", json!({"browseId":browse_id}))?)
+        self.account_page(&self.account_post("browse", json!({"browseId":browse_id}))?)
     }
 
     pub fn playlist(&self, playlist_id: &str) -> Result<Page> {
@@ -273,7 +358,11 @@ impl MusicClient {
 
     pub fn continue_page(&self, endpoint: ContinuationEndpoint, token: &str) -> Result<Page> {
         nonempty(token, "continuation")?;
-        parse::page(&self.post(endpoint.as_str(), json!({"continuation":token}))?)
+        if matches!(endpoint, ContinuationEndpoint::Browse) {
+            self.account_page(&self.account_post(endpoint.as_str(), json!({"continuation":token}))?)
+        } else {
+            parse::page(&self.post(endpoint.as_str(), json!({"continuation":token}))?)
+        }
     }
 
     fn next_raw(&self, video_id: &str) -> Result<Value> {
@@ -371,6 +460,47 @@ pub(crate) fn validate_video_id(id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn oauth_bearer_is_music_scoped_and_never_combined_with_cookies() {
+        let session = crate::oauth::OAuthSession {
+            access_token: "synthetic-access".into(),
+            refresh_token: "synthetic-refresh".into(),
+            expires_at: u64::MAX,
+            client_id: "synthetic-client".into(),
+            client_secret: "synthetic-secret".into(),
+        };
+        let mut config = Config {
+            client_version: Some("test".into()),
+            cookie: Some("SAPISID=old".into()),
+            ..Default::default()
+        };
+        session.apply_to(&mut config).unwrap();
+        assert!(config.cookie.is_none());
+        let client = MusicClient::new(config).unwrap();
+        let _ = client.tv_version.set("test".into());
+        let request = client
+            .tv_request("account/accounts_list", json!({}))
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(
+            request.headers()["authorization"],
+            "Bearer synthetic-access"
+        );
+        assert!(request.headers()["authorization"].is_sensitive());
+        assert!(!request.headers().contains_key("cookie"));
+        let anonymous = client.http.get("https://www.youtube.com/").build().unwrap();
+        assert!(!anonymous.headers().contains_key("authorization"));
+        assert_eq!(client.oauth_session().unwrap().unwrap(), session);
+        let conflicting = Config {
+            client_version: Some("test".into()),
+            cookie: Some("SAPISID=old".into()),
+            oauth: Some(session),
+            ..Default::default()
+        };
+        assert!(MusicClient::new(conflicting).is_err());
+    }
 
     #[test]
     fn web_account_selection_is_signed_and_transport_has_no_default_credentials() {

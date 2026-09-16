@@ -1,4 +1,4 @@
-//! YouTube Music browser-session authentication. This is not Google OAuth.
+//! Verified YouTube Music account sessions. Browser and device OAuth credentials are isolated.
 use crate::{
     client::{cookie_hash, header},
     parse, Config, Error, MusicClient, Result,
@@ -186,10 +186,33 @@ impl BrowserSession {
 
     pub fn apply_to(&self, config: &mut Config) -> Result<()> {
         self.validate()?;
+        config.oauth = None;
         config.cookie = Some(self.cookie.clone());
         config.auth_user = self.auth_user;
         config.delegated_session_id = self.delegated_session_id.clone();
         Ok(())
+    }
+}
+
+/// Credentials serialized only by the host's secure storage. Legacy browser JSON remains compatible.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Session {
+    Browser(BrowserSession),
+    OAuth(crate::oauth::OAuthSession),
+}
+impl Session {
+    pub fn validate(&self) -> Result<()> {
+        match self {
+            Self::Browser(s) => s.validate(),
+            Self::OAuth(s) => s.validate(),
+        }
+    }
+    pub fn apply_to(&self, config: &mut Config) -> Result<()> {
+        match self {
+            Self::Browser(s) => s.apply_to(config),
+            Self::OAuth(s) => s.apply_to(config),
+        }
     }
 }
 
@@ -249,17 +272,34 @@ pub(crate) fn explicitly_signed_out(value: &Value) -> bool {
     }
 }
 
+fn selected_tv_account(value: &Value) -> Option<&Value> {
+    match value {
+        Value::Object(map) => {
+            if let Some(account) = map.get("accountItem") {
+                if account["isSelected"] == true && account["isDisabled"] != true {
+                    return Some(account);
+                }
+            }
+            map.values().find_map(selected_tv_account)
+        }
+        Value::Array(items) => items.iter().find_map(selected_tv_account),
+        _ => None,
+    }
+}
+
 pub(crate) fn parse_account(value: &Value, config: &Config) -> Result<AccountInfo> {
     if explicitly_signed_out(value) {
         return Err(Error::AuthenticationRejected);
     }
-    let header = parse::find(value, "activeAccountHeaderRenderer").ok_or_else(|| {
-        if parse::find(value, "signInEndpoint").is_some() {
-            Error::AuthenticationRejected
-        } else {
-            Error::Protocol("account menu is missing the active account header".into())
-        }
-    })?;
+    let header = parse::find(value, "activeAccountHeaderRenderer")
+        .or_else(|| selected_tv_account(value))
+        .ok_or_else(|| {
+            if parse::find(value, "signInEndpoint").is_some() {
+                Error::AuthenticationRejected
+            } else {
+                Error::Protocol("account menu is missing the active account header".into())
+            }
+        })?;
     let name = parse::text(&header["accountName"]);
     if name.is_empty() {
         return Err(Error::Protocol(
@@ -282,6 +322,9 @@ pub(crate) fn parse_account(value: &Value, config: &Config) -> Result<AccountInf
 
 impl MusicClient {
     pub(crate) fn require_session(&self) -> Result<()> {
+        if self.config.oauth.is_some() {
+            return Ok(());
+        }
         if self
             .config
             .cookie
@@ -297,7 +340,12 @@ impl MusicClient {
     /// Verify the selected Music account remotely. Presence of a cookie is not proof.
     pub fn account(&self) -> Result<AccountInfo> {
         self.require_session()?;
-        let value = self.post("account/account_menu", json!({})).map_err(|e| {
+        let endpoint = if self.config.oauth.is_some() {
+            "account/accounts_list"
+        } else {
+            "account/account_menu"
+        };
+        let value = self.account_post(endpoint, json!({})).map_err(|e| {
             if matches!(e, Error::Http(401) | Error::Http(403)) {
                 Error::AuthenticationRejected
             } else {
@@ -331,6 +379,28 @@ impl MusicClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tv_account_uses_the_selected_enabled_identity() {
+        let value = json!({"contents":[{"accountItem":{"accountName":{"simpleText":"Other"},"isSelected":false}},{"accountItem":{"accountName":{"simpleText":"Selected"},"channelHandle":{"simpleText":"@test"},"isSelected":true,"isDisabled":false}}]});
+        let account = parse_account(&value, &Config::default()).unwrap();
+        assert_eq!(account.name, "Selected");
+        assert_eq!(account.channel_handle.as_deref(), Some("@test"));
+        assert!(parse_account(&json!({"contents":[{"accountItem":{"accountName":{"simpleText":"Disabled"},"isSelected":true,"isDisabled":true}}]}),&Config::default()).is_err());
+    }
+
+    #[test]
+    fn saved_browser_profiles_remain_compatible_with_oauth_profiles() {
+        let session: Session = serde_json::from_str(
+            r#"{"cookie":"SAPISID=synthetic","auth_user":0,"delegated_session_id":null}"#,
+        )
+        .unwrap();
+        assert!(matches!(session, Session::Browser(_)));
+        let mut config = Config::default();
+        session.apply_to(&mut config).unwrap();
+        assert!(config.oauth.is_none());
+        assert!(!format!("{session:?}").contains("synthetic"));
+    }
 
     #[test]
     fn import_discards_captured_hash_and_unrelated_headers() {

@@ -9,7 +9,7 @@ use youtube_music_core::{
 mod browser;
 mod credentials;
 use credentials::{SessionStore, StoreKind};
-use youtube_music_core::auth::{AuthState, AuthStatus, BrowserSession, LOGIN_URL};
+use youtube_music_core::auth::{AuthState, AuthStatus, BrowserSession, Session};
 use zeroize::Zeroizing;
 
 #[derive(Parser)]
@@ -88,15 +88,15 @@ enum Command {
 
 #[derive(Subcommand)]
 enum AuthCommand {
-    /// Open the Music sign-in page and explain how to import its browser session.
+    /// Authorize through Google's official device page, then save OAuth tokens securely.
     Login {
         #[arg(long)]
         no_open: bool,
         /// Connect to an explicitly enabled local Chrome/Edge debugging port.
-        #[arg(long, conflicts_with = "no_open")]
+        #[arg(long)]
         browser_port: Option<u16>,
-        /// Allow time for manual browser login/MFA when using --browser-port.
-        #[arg(long, default_value = "300")]
+        /// Maximum time to wait for official device authorization or browser sign-in.
+        #[arg(long, default_value = "1800")]
         wait_seconds: u64,
     },
     /// Verify request headers / Cookie / Netscape cookies, then save securely.
@@ -133,27 +133,27 @@ fn read_config(cli: &Cli) -> youtube_music_core::Result<Config> {
     }
 }
 
-fn open_login() -> youtube_music_core::Result<()> {
+fn open_url(url: &str) -> youtube_music_core::Result<()> {
     use std::process::{Command as Process, Stdio};
     let mut command;
     #[cfg(target_os = "windows")]
     {
         command = Process::new("cmd.exe");
-        command.args(["/C", "start", "", "https://music.youtube.com/"]);
+        command.args(["/C", "start", "", url]);
     }
     #[cfg(target_os = "macos")]
     {
         command = Process::new("open");
-        command.arg(LOGIN_URL);
+        command.arg(url);
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         if std::env::var_os("WSL_DISTRO_NAME").is_some() {
             command = Process::new("cmd.exe");
-            command.args(["/C", "start", "", "https://music.youtube.com/"]);
+            command.args(["/C", "start", "", url]);
         } else {
             command = Process::new("xdg-open");
-            command.arg(LOGIN_URL);
+            command.arg(url);
         }
     }
     let status = command
@@ -181,29 +181,22 @@ fn auth_command(cli: &Cli, command: &AuthCommand) -> youtube_music_core::Result<
             browser_port,
             wait_seconds,
         } => {
+            if cli.anonymous {
+                return Err(Error::InvalidInput(
+                    "auth login cannot be combined with --anonymous".into(),
+                ));
+            }
             if let Some(port) = browser_port {
-                if cli.anonymous {
-                    return Err(Error::InvalidInput(
-                        "auth login cannot be combined with --anonymous".into(),
-                    ));
-                }
-                eprintln!("Use the Music tab in your browser to finish sign-in/account selection; waiting up to {wait_seconds} seconds.");
-                return save_verified_session(cli, &store, browser::capture(*port, *wait_seconds)?);
+                eprintln!("Finish sign-in in the Music browser tab.");
+                return save_verified_session(
+                    cli,
+                    &store,
+                    browser::capture(*port, (*wait_seconds).min(600))?,
+                );
             }
-            if !no_open {
-                open_login()?;
-            }
-            Ok(
-                serde_json::json!({"state":"browser_action_required", "login_url":LOGIN_URL,
-                "profile":cli.profile, "next":format!("ytmusic --profile {} --store {} auth import --headers-file /path/to/browser-headers.txt", cli.profile, cli.store.as_str()),
-                "browser_debugging":"With a local Chrome/Edge debugging port enabled, run auth login --browser-port PORT to import directly.",
-                "instructions":["Sign in to YouTube Music and select the intended account.",
-                    "Open browser Developer Tools > Network, reload Music, then select a music.youtube.com/youtubei/v1/browse request.",
-                    "Copy its request headers (Cookie and X-Goog-AuthUser) into a private local file, or pipe them to auth import --stdin.",
-                    "Import verifies the selected account before saving. Delete the temporary header file afterward.",
-                    "Use the same --profile and --store options for import, status, library, and logout."]}),
-            )
+            device_login(cli, &store, *no_open, *wait_seconds)
         }
+
         AuthCommand::Logout => Ok(
             serde_json::json!({"profile":cli.profile, "removed":store.delete()?, "scope":"saved_profile"}),
         ),
@@ -254,6 +247,63 @@ fn auth_command(cli: &Cli, command: &AuthCommand) -> youtube_music_core::Result<
     }
 }
 
+fn device_login(
+    cli: &Cli,
+    store: &SessionStore,
+    no_open: bool,
+    wait_seconds: u64,
+) -> youtube_music_core::Result<serde_json::Value> {
+    use std::time::{Duration, Instant};
+    use youtube_music_core::oauth::{DeviceAuthClient, PollResult};
+    if !(1..=3600).contains(&wait_seconds) {
+        return Err(Error::InvalidInput(
+            "wait_seconds must be between 1 and 3600".into(),
+        ));
+    }
+    let mut config = read_config(cli)?;
+    let oauth = DeviceAuthClient::new(&config)?;
+    let device = oauth.begin()?;
+    let lifetime = wait_seconds.min(device.expires_in);
+    eprintln!("Open {} and enter code: {}\nWaiting up to {} seconds for Google authorization. Profile: {}", device.verification_url, device.user_code, lifetime, cli.profile);
+    if !no_open && open_url(&device.verification_url).is_err() {
+        eprintln!("Open the official verification link above manually.");
+    }
+    let deadline = Instant::now() + Duration::from_secs(lifetime);
+    let mut interval = device.interval;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(Error::OAuth(
+                "authorization timed out; run auth login again".into(),
+            ));
+        }
+        std::thread::sleep(Duration::from_secs(interval).min(remaining));
+        if Instant::now() >= deadline {
+            return Err(Error::OAuth(
+                "authorization timed out; run auth login again".into(),
+            ));
+        }
+        match oauth.poll(&device)? {
+            PollResult::Pending => (),
+            PollResult::SlowDown => interval = interval.saturating_add(5).min(300),
+            PollResult::Authorized(session) => {
+                // Google has authorized this grant. Preserve it securely even if
+                // Music's private API layout changes during identity verification.
+                store.save(&Session::OAuth(session.clone()))?;
+                session.apply_to(&mut config)?;
+                let client = MusicClient::new(config)?;
+                let account = client.account()?;
+                if let Some(updated) = client.oauth_session()? {
+                    store.save(&Session::OAuth(updated))?;
+                }
+                return Ok(
+                    serde_json::json!({"state":"authenticated","method":"device_oauth","profile":cli.profile,"account":account,"next":format!("ytmusic --profile {} --store {} library playlists",cli.profile,cli.store.as_str())}),
+                );
+            }
+        }
+    }
+}
+
 fn save_verified_session(
     cli: &Cli,
     store: &SessionStore,
@@ -262,7 +312,7 @@ fn save_verified_session(
     let mut config = read_config(cli)?;
     session.apply_to(&mut config)?;
     let account = MusicClient::new(config)?.account()?;
-    store.save(&session)?;
+    store.save(&Session::Browser(session))?;
     Ok(
         serde_json::json!({"state":"authenticated", "profile":cli.profile, "account":account,
         "next":format!("ytmusic --profile {} --store {} library playlists", cli.profile, cli.store.as_str())}),
@@ -334,16 +384,21 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
     };
     request.validate()?;
     let mut config = read_config(cli)?;
+    let store = SessionStore::new(cli.store, &cli.profile)?;
+    let mut from_store = false;
     if cli.anonymous {
         config.cookie = None;
+        config.oauth = None;
+        config.po_token = None;
         config.auth_user = 0;
         config.delegated_session_id = None;
-    } else if config.cookie.is_none() {
-        if let Some(session) = SessionStore::new(cli.store, &cli.profile)?.load()? {
+    } else if config.cookie.is_none() && config.oauth.is_none() {
+        if let Some(session) = store.load()? {
             session.apply_to(&mut config)?;
+            from_store = true;
         }
     }
-    if config.cookie.is_none() {
+    if config.cookie.is_none() && config.oauth.is_none() {
         if matches!(request, Request::AuthStatus) {
             return Ok(serde_json::json!(AuthStatus {
                 state: AuthState::SignedOut,
@@ -354,7 +409,17 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
             return Err(Error::AuthenticationRequired);
         }
     }
-    MusicClient::new(config)?.execute(request)
+    let client = MusicClient::new(config)?;
+    let previous_oauth = client.oauth_session()?;
+    let result = client.execute(request);
+    if from_store {
+        if let Some(session) = client.oauth_session()? {
+            if previous_oauth.as_ref() != Some(&session) {
+                store.save(&Session::OAuth(session))?;
+            }
+        }
+    }
+    result
 }
 
 fn main() {

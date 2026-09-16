@@ -154,3 +154,39 @@ fn request_validation_is_strict() {
     .validate()
     .is_ok());
 }
+
+#[test]
+fn tv_tiles_preserve_tracks_metadata_pagination_and_selected_tab_only() {
+    let tile = json!({"tileRenderer":{
+        "metadata":{"tileMetadataRenderer":{"title":{"simpleText":"Synthetic track"}}},
+        "header":{"tileHeaderRenderer":{"thumbnail":{"thumbnails":[{"url":"https://example.com/image"}]},"thumbnailOverlays":[{"thumbnailOverlayTimeStatusRenderer":{"text":{"simpleText":"3:21"}}}]}},
+        "onSelectCommand":{"watchEndpoint":{"videoId":"4D7u5KF7SP8"}},
+        "onLongPressCommand":{"tileRenderer":{"title":{"simpleText":"Menu duplicate"}}}
+    }});
+    let page = parse::tv_page(&json!({"contents":{"tabs":[
+        {"tabRenderer":{"selected":false,"content":{"gridRenderer":{"items":[tile.clone()]}}}},
+        {"tabRenderer":{"selected":true,"content":{"playlistVideoListRenderer":{"contents":[tile],"continuations":[{"nextContinuationData":{"continuation":"synthetic-next"}}]}}}}
+    ]}})).unwrap();
+    assert_eq!(page.sections.len(), 1);
+    assert_eq!(page.sections[0].items.len(), 1);
+    let item = &page.sections[0].items[0];
+    assert_eq!(item.video_id.as_deref(), Some("4D7u5KF7SP8"));
+    assert_eq!(item.duration_seconds, Some(201));
+    assert_eq!(item.thumbnails.len(), 1);
+    assert_eq!(
+        page.sections[0].continuation.as_deref(),
+        Some("synthetic-next")
+    );
+}
+
+#[test]
+fn tv_playlists_with_watch_endpoints_keep_their_browse_identity() {
+    let page=parse::tv_page(&json!({"contents":{"gridRenderer":{"items":[{"tileRenderer":{
+        "contentType":"TILE_CONTENT_TYPE_PLAYLIST","metadata":{"tileMetadataRenderer":{"title":{"simpleText":"Synthetic Mix"}}},
+        "onSelectCommand":{"watchEndpoint":{"videoId":"4D7u5KF7SP8","playlistId":"RDsynthetic"}}
+    }}]}}})).unwrap();
+    let item = &page.sections[0].items[0];
+    assert_eq!(item.kind, "playlist");
+    assert_eq!(item.browse_id.as_deref(), Some("VLRDsynthetic"));
+    assert_eq!(item.video_id.as_deref(), Some("4D7u5KF7SP8"));
+}
