@@ -32,7 +32,7 @@ struct Cli {
     /// Ignore saved profiles and any credentials in the configuration file.
     #[arg(long, global = true)]
     anonymous: bool,
-    /// Whole-operation timeout, including retries and player processing.
+    /// Core operation timeout, including retries and player processing.
     #[arg(long, global = true, default_value = "120000")]
     timeout_ms: u64,
     #[command(subcommand)]
@@ -536,9 +536,6 @@ fn main() {
                 timeout_ms: cli.timeout_ms,
             },
         )?;
-        let signal = operation.clone();
-        ctrlc::set_handler(move || signal.cancel())
-            .map_err(|_| Error::Protocol("cannot install cancellation handler".into()))?;
         operation.run(|| run(&cli))
     })();
     let failed = result.is_err();
