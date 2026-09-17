@@ -49,6 +49,19 @@ pub fn validate_profile(profile: &str) -> Result<()> {
     Ok(())
 }
 
+fn decode_session(bytes: &[u8]) -> Result<Session> {
+    serde_json::from_slice(bytes).map_err(|error| {
+        if error
+            .to_string()
+            .contains(youtube_music_core::auth::LEGACY_AUTH_MESSAGE)
+        {
+            storage(youtube_music_core::auth::LEGACY_AUTH_MESSAGE)
+        } else {
+            storage("saved profile is invalid; import a new session with auth import")
+        }
+    })
+}
+
 impl SessionStore {
     pub fn new(kind: StoreKind, profile: &str) -> Result<Self> {
         validate_profile(profile)?;
@@ -130,8 +143,7 @@ impl SessionStore {
         if bytes.is_empty() {
             return Err(storage("saved profile is empty; import a new session"));
         }
-        let session: Session = serde_json::from_slice(&bytes)
-            .map_err(|_| storage("saved profile is invalid; import a new session"))?;
+        let session: Session = decode_session(&bytes)?;
         session.validate()?;
         Ok(Some(session))
     }
@@ -383,6 +395,19 @@ mod native {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_oauth_profiles_require_cookie_import_without_echoing_secrets() {
+        for bytes in [
+            br#"{"access_token":"private-access","refresh_token":"private-refresh","client_secret":"private-secret"}"#.as_slice(),
+            br#"{"access_token":"private-access","refresh_token":"private-refresh","client_id":"client"}"#.as_slice(),
+        ] {
+            let error = decode_session(bytes).unwrap_err().to_string();
+            assert!(error.contains("auth import"));
+            assert!(error.contains("OAuth profiles are no longer supported"));
+            assert!(!error.contains("private"));
+        }
+    }
+
     #[test]
     fn profile_names_cannot_escape_the_store() {
         for name in ["", "../other", "a/b", "a\\b", "--force", "a b"] {

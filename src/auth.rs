@@ -1,4 +1,4 @@
-//! Verified YouTube Music account sessions. Browser and device OAuth credentials are isolated.
+//! Verified YouTube Music web sessions imported from the official browser client.
 use crate::{
     client::{cookie_hash, header},
     parse, Config, Error, MusicClient, Result,
@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
 pub const LOGIN_URL: &str = "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F";
+pub const LEGACY_AUTH_MESSAGE: &str = "OAuth profiles are no longer supported; import official YouTube Music browser cookies with auth import --browser-port PORT or auth import --headers-file FILE";
 const MAX_IMPORT: usize = 1024 * 1024;
 
 /// Secret material. Serialize only into a host-provided secure credential store.
@@ -186,8 +187,6 @@ impl BrowserSession {
 
     pub fn apply_to(&self, config: &mut Config) -> Result<()> {
         self.validate()?;
-        config.oauth = None;
-        config.music_oauth = None;
         config.cookie = Some(self.cookie.clone());
         config.auth_user = self.auth_user;
         config.delegated_session_id = self.delegated_session_id.clone();
@@ -196,26 +195,33 @@ impl BrowserSession {
 }
 
 /// Credentials serialized only by the host's secure storage. Legacy browser JSON remains compatible.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum Session {
     Browser(BrowserSession),
-    OAuth(crate::oauth::OAuthSession),
-    MusicOAuth(crate::music_oauth::MusicOAuthSession),
+}
+impl<'de> Deserialize<'de> for Session {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        if value.get("access_token").is_some() || value.get("refresh_token").is_some() {
+            return Err(serde::de::Error::custom(LEGACY_AUTH_MESSAGE));
+        }
+        BrowserSession::deserialize(value)
+            .map(Self::Browser)
+            .map_err(serde::de::Error::custom)
+    }
 }
 impl Session {
     pub fn validate(&self) -> Result<()> {
         match self {
             Self::Browser(s) => s.validate(),
-            Self::OAuth(s) => s.validate(),
-            Self::MusicOAuth(s) => s.validate(),
         }
     }
     pub fn apply_to(&self, config: &mut Config) -> Result<()> {
         match self {
             Self::Browser(s) => s.apply_to(config),
-            Self::OAuth(s) => s.apply_to(config),
-            Self::MusicOAuth(s) => s.apply_to(config),
         }
     }
 }
@@ -276,7 +282,7 @@ pub(crate) fn explicitly_signed_out(value: &Value) -> bool {
     }
 }
 
-fn selected_tv_account(value: &Value) -> Option<&Value> {
+fn selected_account(value: &Value) -> Option<&Value> {
     match value {
         Value::Object(map) => {
             if let Some(account) = map.get("accountItem") {
@@ -284,9 +290,9 @@ fn selected_tv_account(value: &Value) -> Option<&Value> {
                     return Some(account);
                 }
             }
-            map.values().find_map(selected_tv_account)
+            map.values().find_map(selected_account)
         }
-        Value::Array(items) => items.iter().find_map(selected_tv_account),
+        Value::Array(items) => items.iter().find_map(selected_account),
         _ => None,
     }
 }
@@ -296,7 +302,7 @@ pub(crate) fn parse_account(value: &Value, config: &Config) -> Result<AccountInf
         return Err(Error::AuthenticationRejected);
     }
     let header = parse::find(value, "activeAccountHeaderRenderer")
-        .or_else(|| selected_tv_account(value))
+        .or_else(|| selected_account(value))
         .ok_or_else(|| {
             if parse::find(value, "signInEndpoint").is_some() {
                 Error::AuthenticationRejected
@@ -326,9 +332,6 @@ pub(crate) fn parse_account(value: &Value, config: &Config) -> Result<AccountInf
 
 impl MusicClient {
     pub(crate) fn require_session(&self) -> Result<()> {
-        if self.config.oauth.is_some() || self.is_android_music() {
-            return Ok(());
-        }
         if self
             .config
             .cookie
@@ -344,12 +347,7 @@ impl MusicClient {
     /// Verify the selected Music account remotely. Presence of a cookie is not proof.
     pub fn account(&self) -> Result<AccountInfo> {
         self.require_session()?;
-        let endpoint = if self.config.oauth.is_some() || self.is_android_music() {
-            "account/accounts_list"
-        } else {
-            "account/account_menu"
-        };
-        let value = self.account_post(endpoint, json!({})).map_err(|e| {
+        let value = self.post("account/account_menu", json!({})).map_err(|e| {
             if matches!(e, Error::Http(401) | Error::Http(403)) {
                 Error::AuthenticationRejected
             } else {
@@ -385,7 +383,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tv_account_uses_the_selected_enabled_identity() {
+    fn account_list_uses_the_selected_enabled_identity() {
         let value = json!({"contents":[{"accountItem":{"accountName":{"simpleText":"Other"},"isSelected":false}},{"accountItem":{"accountName":{"simpleText":"Selected"},"channelHandle":{"simpleText":"@test"},"isSelected":true,"isDisabled":false}}]});
         let account = parse_account(&value, &Config::default()).unwrap();
         assert_eq!(account.name, "Selected");
@@ -394,7 +392,7 @@ mod tests {
     }
 
     #[test]
-    fn saved_browser_profiles_remain_compatible_with_oauth_profiles() {
+    fn saved_browser_profiles_remain_compatible() {
         let session: Session = serde_json::from_str(
             r#"{"cookie":"SAPISID=synthetic","auth_user":0,"delegated_session_id":null}"#,
         )
@@ -402,7 +400,7 @@ mod tests {
         assert!(matches!(session, Session::Browser(_)));
         let mut config = Config::default();
         session.apply_to(&mut config).unwrap();
-        assert!(config.oauth.is_none());
+        assert_eq!(config.cookie.as_deref(), Some("SAPISID=synthetic"));
         assert!(!format!("{session:?}").contains("synthetic"));
     }
 

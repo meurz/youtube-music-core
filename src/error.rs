@@ -13,7 +13,7 @@ pub enum Error {
     #[error("playback unavailable ({status}): {reason}")]
     Unplayable { status: String, reason: String },
     #[error(
-        "no direct audio URL; signature/n deciphering or additional player attestation is required"
+        "no usable Web audio URL; the player may require additional attestation or unsupported delivery"
     )]
     StreamResolutionRequired,
     #[error("no verified audio stream: {0}")]
@@ -28,8 +28,6 @@ pub enum Error {
     AuthenticationRejected,
     #[error("credential storage failed: {0}")]
     CredentialStorage(String),
-    #[error("device authorization failed: {0}")]
-    OAuth(String),
 }
 
 #[derive(Serialize)]
@@ -53,7 +51,6 @@ impl Error {
             Self::AuthenticationRequired => "authentication_required",
             Self::AuthenticationRejected => "authentication_rejected",
             Self::CredentialStorage(_) => "credential_storage",
-            Self::OAuth(_) => "oauth",
         };
         ErrorInfo {
             code,

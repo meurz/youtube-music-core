@@ -36,17 +36,12 @@ impl MusicClient {
         if let Some(token) = continuation {
             nonempty(token, "continuation")?;
         }
-        if self.config.oauth.is_some()
-            && matches!(section, LibrarySection::Songs | LibrarySection::Artists)
-        {
-            return Err(Error::InvalidInput("TV device authorization does not expose saved songs or library artists; use likes/subscriptions, or import a browser session for these sections".into()));
-        }
         self.account()?;
         let mut body = json!({"browseId":section.browse_id()});
         if let Some(token) = continuation {
             body["continuation"] = token.into();
         }
-        let value = self.account_post("browse", body).map_err(|e| {
+        let value = self.post("browse", body).map_err(|e| {
             if matches!(e, Error::Http(401) | Error::Http(403)) {
                 Error::AuthenticationRejected
             } else {
@@ -56,25 +51,7 @@ impl MusicClient {
         if explicitly_signed_out(&value) {
             return Err(Error::AuthenticationRejected);
         }
-        if self.config.oauth.is_some() || self.is_android_music() {
-            let mut page = self.account_page(&value)?;
-            for group in &mut page.sections {
-                group
-                    .items
-                    .retain(|item| item.video_id.is_some() || item.browse_id.is_some());
-            }
-            if page.sections.is_empty()
-                && parse::find(&value, "messageRenderer").is_none()
-                && parse::find(&value, "genericPromoRenderer").is_none()
-            {
-                return Err(Error::Protocol(
-                    "account client did not return this library section".into(),
-                ));
-            }
-            Ok(page)
-        } else {
-            parse_library_page(&value)
-        }
+        parse_library_page(&value)
     }
 }
 

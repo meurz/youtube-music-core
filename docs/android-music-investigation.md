@@ -1,6 +1,6 @@
 # Android Music protocol investigation
 
-Status: migration blocked on link-based authentication, not released. Observed on 2026-09-17.
+Status: historical investigation, superseded on 2026-09-17 by the user’s decision to import browser Cookies and use the official Web client for the entire chain. The experimental Android/OAuth runtime was removed for 0.5.0. Findings below record the earlier investigation, not the current implementation.
 
 The intended migration uses Android Music for every API operation and retains sign-in through an official Google authorization link **without an unverified-app warning**. Importing an Android phone's credentials or proceeding past that warning is not an accepted sign-in method for this migration. The released 0.4.0 behavior has not been changed.
 
