@@ -98,6 +98,102 @@ fn collect_links(v: &Value, links: &mut Vec<(Link, String)>) {
     }
 }
 
+fn item_actions(v: &Value) -> ItemActions {
+    fn walk(v: &Value, out: &mut ItemActions) {
+        match v {
+            Value::Object(m) => {
+                if let Some(rating) = m.get("likeStatus").and_then(Value::as_str) {
+                    out.rating = match rating {
+                        "LIKE" => Some(crate::mutations::Rating::Like),
+                        "DISLIKE" => Some(crate::mutations::Rating::Dislike),
+                        "INDIFFERENT" => Some(crate::mutations::Rating::Indifferent),
+                        _ => out.rating,
+                    };
+                }
+                if let Some(button) = m.get("subscribeButtonRenderer") {
+                    out.subscribed = button["subscribed"].as_bool();
+                }
+                if let Some(editable) = m.get("isEditable").and_then(Value::as_bool) {
+                    out.can_edit = Some(editable);
+                }
+                if m.contains_key("playlistEditorEndpoint")
+                    || m.contains_key("musicEditablePlaylistDetailHeaderRenderer")
+                {
+                    out.can_edit = Some(true);
+                }
+                if let Some(toggle) = m.get("toggleMenuServiceItemRenderer") {
+                    let icon = toggle["defaultIcon"]["iconType"].as_str();
+                    if matches!(icon, Some("BOOKMARK" | "BOOKMARK_BORDER")) {
+                        let default = find(&toggle["defaultServiceEndpoint"], "feedbackToken")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
+                        let toggled = find(&toggle["toggledServiceEndpoint"], "feedbackToken")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned);
+                        let remove_default = icon == Some("BOOKMARK");
+                        out.in_library = Some(remove_default || toggle["isToggled"] == true);
+                        if remove_default {
+                            out.add_library_token = toggled;
+                            out.remove_library_token = default;
+                        } else {
+                            out.add_library_token = default;
+                            out.remove_library_token = toggled;
+                        }
+                    }
+                }
+                // Header album/playlist save buttons advertise LIKE/INDIFFERENT
+                // against a playlist target; song rating is a different state.
+                if let Some(button) = m.get("likeButtonRenderer") {
+                    if find(button, "playlistId").is_some() {
+                        out.in_library = button["likeStatus"].as_str().and_then(|s| match s {
+                            "LIKE" => Some(true),
+                            "INDIFFERENT" | "DISLIKE" => Some(false),
+                            _ => None,
+                        });
+                    }
+                }
+                if let Some(button) = m.get("toggleButtonRenderer") {
+                    let target = &button["defaultServiceEndpoint"]["likeEndpoint"]["target"];
+                    if target["playlistId"].is_string()
+                        && matches!(
+                            button["defaultIcon"]["iconType"].as_str(),
+                            Some("BOOKMARK_BORDER" | "BOOKMARK")
+                        )
+                    {
+                        out.in_library = button["isToggled"].as_bool().map(|toggled| {
+                            toggled != (button["defaultIcon"]["iconType"] == "BOOKMARK")
+                        });
+                    }
+                }
+                for child in m.values() {
+                    walk(child, out);
+                }
+            }
+            Value::Array(a) => {
+                for child in a {
+                    walk(child, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = ItemActions::default();
+    walk(v, &mut out);
+    out
+}
+
+fn item_playlist_id(v: &Value, browse_id: Option<&str>) -> Option<String> {
+    browse_id
+        .and_then(|s| s.strip_prefix("VL"))
+        .filter(|s| !s.is_empty())
+        .or_else(|| v["playlistId"].as_str())
+        .or_else(|| find(&v["buttons"], "playlistId").and_then(Value::as_str))
+        .or_else(|| find(&v["menu"], "playlistId").and_then(Value::as_str))
+        .or_else(|| find(&v["navigationEndpoint"], "playlistId").and_then(Value::as_str))
+        .or_else(|| find(&v["overlay"], "playlistId").and_then(Value::as_str))
+        .map(str::to_owned)
+}
+
 fn parse_item(r: &Value) -> Option<Item> {
     let first = &r["flexColumns"][0]["musicResponsiveListItemFlexColumnRenderer"]["text"];
     let title = if first.is_null() {
@@ -118,6 +214,7 @@ fn parse_item(r: &Value) -> Option<Item> {
         .or_else(|| r["videoId"].as_str())
         .or_else(|| find(endpoint, "videoId").and_then(Value::as_str))
         .or_else(|| find(&r["overlay"], "videoId").and_then(Value::as_str))
+        .or_else(|| find(&r["menu"], "removedVideoId").and_then(Value::as_str))
         .map(str::to_owned);
     let browse_id = endpoint["browseEndpoint"]["browseId"]
         .as_str()
@@ -190,12 +287,24 @@ fn parse_item(r: &Value) -> Option<Item> {
         title,
         kind,
         video_id,
+        playlist_id: item_playlist_id(r, browse_id.as_deref()),
         browse_id,
         artists,
         album,
         duration_seconds,
         thumbnails: thumbnails(&r["thumbnail"]),
         explicit,
+        available: r["isPlayable"].as_bool().or_else(|| {
+            r["musicItemRendererDisplayPolicy"]
+                .as_str()
+                .map(|p| p != "MUSIC_ITEM_RENDERER_DISPLAY_POLICY_GREY_OUT")
+        }),
+        set_video_id: r["playlistItemData"]["playlistSetVideoId"]
+            .as_str()
+            .or_else(|| r["setVideoId"].as_str())
+            .or_else(|| find(&r["menu"], "setVideoId").and_then(Value::as_str))
+            .map(str::to_owned),
+        actions: item_actions(r),
     })
 }
 
@@ -309,15 +418,15 @@ pub fn page(v: &Value) -> Result<Page> {
             });
         }
     }
-    let title = [
+    let header = [
         "musicDetailHeaderRenderer",
         "musicResponsiveHeaderRenderer",
         "musicImmersiveHeaderRenderer",
         "musicVisualHeaderRenderer",
     ]
     .iter()
-    .find_map(|key| find(v, key).map(|r| text(&r["title"])))
-    .filter(|s| !s.is_empty());
+    .find_map(|key| find(v, key));
+    let title = header.map(|r| text(&r["title"])).filter(|s| !s.is_empty());
     if parsed.is_empty()
         && v.get("contents").is_none()
         && v.get("continuationContents").is_none()
@@ -328,6 +437,8 @@ pub fn page(v: &Value) -> Result<Page> {
     Ok(Page {
         title,
         sections: parsed,
+        playlist_id: header.and_then(|h| item_playlist_id(h, None)),
+        actions: header.map(item_actions).unwrap_or_default(),
     })
 }
 
@@ -418,4 +529,67 @@ pub fn lyrics(v: &Value, browse_id: &str) -> Result<Lyrics> {
         text,
         source: (!source.is_empty()).then_some(source),
     })
+}
+
+#[cfg(test)]
+mod mutation_tests {
+    use super::*;
+    use serde_json::json;
+    fn toggle(icon: &str, toggled: bool) -> Value {
+        json!({"toggleMenuServiceItemRenderer":{
+            "defaultIcon":{"iconType":icon},"isToggled":toggled,
+            "defaultServiceEndpoint":{"feedbackEndpoint":{"feedbackToken":"fixture-default"}},
+            "toggledServiceEndpoint":{"feedbackEndpoint":{"feedbackToken":"fixture-toggled"}}
+        }})
+    }
+    #[test]
+    fn tokens_follow_server_actions_not_localized_labels() {
+        let add = item_actions(&json!({"menu":{"items":[toggle("BOOKMARK_BORDER",true)]}}));
+        assert_eq!(add.in_library, Some(true));
+        assert_eq!(add.add_library_token.as_deref(), Some("fixture-default"));
+        assert_eq!(add.remove_library_token.as_deref(), Some("fixture-toggled"));
+        let remove = item_actions(&toggle("BOOKMARK", false));
+        assert_eq!(remove.in_library, Some(true));
+        assert_eq!(
+            remove.remove_library_token.as_deref(),
+            Some("fixture-default")
+        );
+        assert_eq!(item_actions(&toggle("KEEP", false)).in_library, None);
+    }
+    #[test]
+    fn unavailable_duplicate_song_retains_remove_identifiers() {
+        let item=parse_item(&json!({
+            "title":{"simpleText":"Unavailable"},
+            "musicItemRendererDisplayPolicy":"MUSIC_ITEM_RENDERER_DISPLAY_POLICY_GREY_OUT",
+            "menu":{"menuRenderer":{"items":[{"menuServiceItemRenderer":{"serviceEndpoint":{
+                "playlistEditEndpoint":{"playlistId":"PLfixture","actions":[{"action":"ACTION_REMOVE_VIDEO","removedVideoId":"4D7u5KF7SP8","setVideoId":"entry-2"}]}
+            }}}]}}
+        })).unwrap();
+        assert_eq!(item.available, Some(false));
+        assert_eq!(item.video_id.as_deref(), Some("4D7u5KF7SP8"));
+        assert_eq!(item.set_video_id.as_deref(), Some("entry-2"));
+        assert_eq!(item.playlist_id.as_deref(), Some("PLfixture"));
+    }
+    #[test]
+    fn page_actions_do_not_leak_the_first_songs_state() {
+        let page=page(&json!({
+            "header":{"musicResponsiveHeaderRenderer":{"title":{"simpleText":"Album"},"buttons":[{"likeButtonRenderer":{"likeStatus":"INDIFFERENT","target":{"playlistId":"OLAKfixture"}}}]}},
+            "contents":{"musicShelfRenderer":{"contents":[{"musicResponsiveListItemRenderer":{"title":{"simpleText":"Song"},"menu":{"items":[toggle("BOOKMARK",false)]}}}]}}
+        })).unwrap();
+        assert_eq!(page.playlist_id.as_deref(), Some("OLAKfixture"));
+        assert_eq!(page.actions.in_library, Some(false));
+        assert!(page.actions.remove_library_token.is_none());
+        assert_eq!(page.sections[0].items[0].actions.in_library, Some(true));
+    }
+    #[test]
+    fn modern_header_save_toggle_and_editor_are_exposed() {
+        let header = json!({"buttons":[
+            {"toggleButtonRenderer":{"isToggled":true,"defaultIcon":{"iconType":"BOOKMARK_BORDER"},"defaultServiceEndpoint":{"likeEndpoint":{"status":"LIKE","target":{"playlistId":"OLAKfixture"}}}}},
+            {"buttonRenderer":{"navigationEndpoint":{"playlistEditorEndpoint":{"playlistId":"PLfixture"}}}}
+        ]});
+        let actions = item_actions(&header);
+        assert_eq!(actions.in_library, Some(true));
+        assert_eq!(actions.can_edit, Some(true));
+        assert_eq!(item_actions(&json!({})).can_edit, None);
+    }
 }
