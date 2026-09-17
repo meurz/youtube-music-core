@@ -23,6 +23,13 @@ jobs:
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
       - run: cargo run --locked -- --help
+      - uses: actions/setup-dotnet@v4
+        if: runner.os == 'Windows'
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build .NET host example
+        if: runner.os == 'Windows'
+        run: dotnet build examples/dotnet --configuration Release
       - name: Build Windows release candidate
         if: runner.os == 'Windows'
         run: cargo build --release --locked

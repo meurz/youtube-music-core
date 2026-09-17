@@ -1,6 +1,8 @@
 //! CLI host storage. The protocol library never implicitly persists credentials.
 use std::{
+    fs::{File, OpenOptions},
     io::{Read, Write},
+    path::Path,
     process::{Command, Stdio},
 };
 use youtube_music_core::{auth::Session, Error, Result};
@@ -33,6 +35,43 @@ pub struct SessionStore {
 
 fn storage(message: &str) -> Error {
     Error::CredentialStorage(message.into())
+}
+
+// Keep this inode permanently: unlinking a lock file while another process has
+// it open would let a third process acquire an unrelated lock at the same path.
+fn lock_profile(path: &Path) -> Result<File> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| storage("invalid credential lock path"))?;
+    std::fs::create_dir_all(parent)
+        .map_err(|_| storage("cannot create the credential lock directory"))?;
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options
+        .open(path)
+        .map_err(|_| storage("cannot open the credential profile lock"))?;
+    file.lock()
+        .map_err(|_| storage("cannot lock the credential profile"))?;
+    Ok(file)
+}
+
+// The caller must retain the profile lock across both closures.
+fn compare_and_save(
+    expected: &Session,
+    next: &Session,
+    load: impl FnOnce() -> Result<Option<Session>>,
+    save: impl FnOnce(&Session) -> Result<()>,
+) -> Result<bool> {
+    if load()?.as_ref() != Some(expected) {
+        return Ok(false);
+    }
+    save(next)?;
+    Ok(true)
 }
 
 pub fn validate_profile(profile: &str) -> Result<()> {
@@ -93,7 +132,21 @@ impl SessionStore {
         Ok(root.join(format!("{}.gpg", self.pass_key())))
     }
 
+    fn lock(&self) -> Result<File> {
+        let path = match self.kind {
+            StoreKind::Pass => self.pass_file()?,
+            StoreKind::Keyring => native::path(&self.profile)?,
+            StoreKind::Auto => unreachable!(),
+        };
+        lock_profile(&path.with_extension("lock"))
+    }
+
     pub fn load(&self) -> Result<Option<Session>> {
+        let _lock = self.lock()?;
+        self.load_unlocked()
+    }
+
+    fn load_unlocked(&self) -> Result<Option<Session>> {
         let bytes = match self.kind {
             StoreKind::Pass => {
                 if !self
@@ -149,6 +202,26 @@ impl SessionStore {
     }
 
     pub fn save(&self, session: &Session) -> Result<()> {
+        let _lock = self.lock()?;
+        self.save_unlocked(session)
+    }
+
+    /// Save a rotated session only if this profile still contains the session
+    /// used for the request. A newer import or logout wins over a late response.
+    /// Locks coordinate this CLI's readers/writers; independent external pass
+    /// commands do not honor them and must not modify the same entry concurrently.
+    pub fn save_if_unchanged(&self, expected: &Session, next: &Session) -> Result<bool> {
+        next.validate()?;
+        let _lock = self.lock()?;
+        compare_and_save(
+            expected,
+            next,
+            || self.load_unlocked(),
+            |session| self.save_unlocked(session),
+        )
+    }
+
+    fn save_unlocked(&self, session: &Session) -> Result<()> {
         session.validate()?;
         let bytes = Zeroizing::new(
             serde_json::to_vec(session).map_err(|_| storage("cannot encode the session"))?,
@@ -191,6 +264,11 @@ impl SessionStore {
     }
 
     pub fn delete(&self) -> Result<bool> {
+        let _lock = self.lock()?;
+        self.delete_unlocked()
+    }
+
+    fn delete_unlocked(&self) -> Result<bool> {
         match self.kind {
             StoreKind::Pass => {
                 if !self
@@ -272,7 +350,7 @@ mod native {
     use base64::{engine::general_purpose::STANDARD, Engine};
     use std::path::PathBuf;
 
-    fn path(profile: &str) -> Result<PathBuf> {
+    pub(super) fn path(profile: &str) -> Result<PathBuf> {
         #[cfg(target_os = "windows")]
         let root = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
         #[cfg(target_os = "macos")]
@@ -381,6 +459,9 @@ mod native {
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 mod native {
     use super::*;
+    pub(super) fn path(_: &str) -> Result<std::path::PathBuf> {
+        Err(storage("use the pass backend on this platform"))
+    }
     pub fn load(_: &str) -> Result<Option<Zeroizing<Vec<u8>>>> {
         Err(storage("use the pass backend on this platform"))
     }
@@ -395,6 +476,102 @@ mod native {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn synthetic_session(value: &str) -> Session {
+        Session::Browser(
+            youtube_music_core::auth::BrowserSession::from_browser_headers(&format!(
+                "SAPISID={value}"
+            ))
+            .unwrap(),
+        )
+    }
+
+    #[test]
+    fn rotated_save_preserves_newer_import_logout_and_storage_failures() {
+        let expected = synthetic_session("before");
+        let next = synthetic_session("rotated");
+        for current in [None, Some(synthetic_session("reimported"))] {
+            let saved = compare_and_save(
+                &expected,
+                &next,
+                || Ok(current),
+                |_| panic!("a newer import or logout must not be overwritten"),
+            )
+            .unwrap();
+            assert!(!saved);
+        }
+        assert!(compare_and_save(
+            &expected,
+            &next,
+            || Err(storage("unreadable")),
+            |_| panic!("unreadable credentials must not be overwritten"),
+        )
+        .is_err());
+        assert!(compare_and_save(
+            &expected,
+            &next,
+            || Ok(Some(expected.clone())),
+            |_| Err(storage("save failed")),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn profile_lock_makes_concurrent_rotations_compare_and_save_atomic() {
+        use std::sync::{Arc, Barrier};
+
+        let directory = tempfile::tempdir().unwrap();
+        let profile = directory.path().join("synthetic.json");
+        let lock_path = directory.path().join("synthetic.lock");
+        let expected = synthetic_session("before");
+        std::fs::write(&profile, serde_json::to_vec(&expected).unwrap()).unwrap();
+        let start = Arc::new(Barrier::new(3));
+        let mut workers = Vec::new();
+        for value in ["rotation-one", "rotation-two"] {
+            let profile = profile.clone();
+            let lock_path = lock_path.clone();
+            let expected = expected.clone();
+            let start = Arc::clone(&start);
+            workers.push(std::thread::spawn(move || {
+                let next = synthetic_session(value);
+                start.wait();
+                let _lock = lock_profile(&lock_path).unwrap();
+                compare_and_save(
+                    &expected,
+                    &next,
+                    || Ok(Some(decode_session(&std::fs::read(&profile).unwrap())?)),
+                    |session| {
+                        std::fs::write(&profile, serde_json::to_vec(session).unwrap()).unwrap();
+                        Ok(())
+                    },
+                )
+                .unwrap()
+            }));
+        }
+        start.wait();
+        let writes = workers
+            .into_iter()
+            .map(|worker| usize::from(worker.join().unwrap()))
+            .sum::<usize>();
+        assert_eq!(writes, 1);
+        let current = decode_session(&std::fs::read(&profile).unwrap()).unwrap();
+        assert!(
+            current == synthetic_session("rotation-one")
+                || current == synthetic_session("rotation-two")
+        );
+        assert!(lock_path.exists());
+        let _lock = lock_profile(&lock_path).unwrap();
+        let second = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&lock_path)
+            .unwrap();
+        assert!(matches!(
+            second.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+    }
+
     #[test]
     fn legacy_oauth_profiles_require_cookie_import_without_echoing_secrets() {
         for bytes in [

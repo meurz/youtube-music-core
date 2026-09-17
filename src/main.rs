@@ -116,6 +116,8 @@ enum AuthCommand {
     },
     /// Verify the saved session with YouTube; a cookie's presence is insufficient.
     Status,
+    /// Update Music cookies, verify the account, and save changes securely.
+    Refresh,
     /// Remove this local profile. Does not sign other browser sessions out of Google.
     Logout,
 }
@@ -132,6 +134,7 @@ fn read_config(cli: &Cli) -> youtube_music_core::Result<Config> {
             if let Some(fields) = value.as_object_mut() {
                 for key in [
                     "cookie",
+                    "cookie_expirations",
                     "oauth",
                     "music_oauth",
                     "po_token",
@@ -159,6 +162,7 @@ fn read_config(cli: &Cli) -> youtube_music_core::Result<Config> {
             if let Some(fields) = value.as_object_mut() {
                 for key in [
                     "cookie",
+                    "cookie_expirations",
                     "oauth",
                     "music_oauth",
                     "auth_user",
@@ -314,7 +318,9 @@ fn auth_command(cli: &Cli, command: &AuthCommand) -> youtube_music_core::Result<
             }
             save_verified_session(cli, &store, session)
         }
-        AuthCommand::Status => unreachable!("status follows normal credential loading"),
+        AuthCommand::Status | AuthCommand::Refresh => {
+            unreachable!("session operations follow normal credential loading")
+        }
     }
 }
 
@@ -325,7 +331,11 @@ fn save_verified_session(
 ) -> youtube_music_core::Result<serde_json::Value> {
     let mut config = read_config(cli)?;
     session.apply_to(&mut config)?;
-    let account = MusicClient::new(config)?.account()?;
+    let client = MusicClient::new(config)?;
+    let account = client.account()?;
+    let session = client
+        .browser_session()?
+        .ok_or(Error::AuthenticationRequired)?;
     store.save(&Session::Browser(session))?;
     Ok(
         serde_json::json!({"state":"authenticated", "method":"browser_cookie", "profile":cli.profile, "account":account,
@@ -335,7 +345,7 @@ fn save_verified_session(
 
 fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
     if let Command::Auth { command } = &cli.command {
-        if !matches!(command, AuthCommand::Status) {
+        if !matches!(command, AuthCommand::Status | AuthCommand::Refresh) {
             return auth_command(cli, command);
         }
     }
@@ -343,6 +353,9 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
         Command::Auth {
             command: AuthCommand::Status,
         } => Request::AuthStatus,
+        Command::Auth {
+            command: AuthCommand::Refresh,
+        } => Request::AuthRefresh,
         Command::Auth { .. } => unreachable!(),
         Command::Account => Request::Account,
         Command::Library {
@@ -399,8 +412,10 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
     request.validate()?;
     let mut config = read_config(cli)?;
     let store = SessionStore::new(cli.store, &cli.profile)?;
+    let mut loaded_session = None;
     if cli.anonymous {
         config.cookie = None;
+        config.cookie_expirations.clear();
         config.po_token = None;
         config.visitor_data = None;
         config.auth_user = 0;
@@ -408,6 +423,7 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
     } else if config.cookie.is_none() {
         if let Some(session) = store.load()? {
             session.apply_to(&mut config)?;
+            loaded_session = Some(session);
         }
     }
     if config.cookie.is_none() {
@@ -417,12 +433,46 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
                 account: None
             }));
         }
-        if matches!(request, Request::Account | Request::Library { .. }) {
+        if matches!(
+            request,
+            Request::AuthRefresh | Request::Account | Request::Library { .. }
+        ) {
             return Err(Error::AuthenticationRequired);
         }
     }
+    let refresh = matches!(request, Request::AuthRefresh);
     let client = MusicClient::new(config)?;
-    client.execute(request)
+    let mut result = client.execute(request)?;
+    let mut saved = false;
+    if result.get("state").and_then(serde_json::Value::as_str) != Some("rejected") {
+        if let Some(expected) = loaded_session {
+            let maintenance = (|| -> youtube_music_core::Result<bool> {
+                if let Some(session) = client.browser_session()? {
+                    let next = Session::Browser(session);
+                    if next != expected {
+                        let saved = store.save_if_unchanged(&expected, &next)?;
+                        if !saved {
+                            eprintln!("Profile changed during this request; skipped saving older session updates.");
+                        }
+                        return Ok(saved);
+                    }
+                }
+                Ok(false)
+            })();
+            match maintenance {
+                Ok(value) => saved = value,
+                Err(error) if refresh => return Err(error),
+                Err(error) => eprintln!(
+                    "Session update was not saved ({}); run auth refresh to retry. The requested result is still available.",
+                    error.info().code
+                ),
+            }
+        }
+    }
+    if refresh {
+        result["saved"] = saved.into();
+    }
+    Ok(result)
 }
 
 fn main() {
@@ -484,6 +534,7 @@ mod tests {
             );
             BrowserSession {
                 cookie: "SAPISID=new".into(),
+                cookie_expirations: Default::default(),
                 auth_user: 2,
                 delegated_session_id: None,
             }

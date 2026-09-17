@@ -8,6 +8,7 @@ pub mod library;
 pub mod model;
 pub mod parse;
 mod playback;
+mod session;
 
 pub use client::{Config, ContinuationEndpoint, MusicClient};
 pub use error::{Error, ErrorInfo, Result};
@@ -18,6 +19,7 @@ use serde_json::{json, Value};
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
     AuthStatus,
+    AuthRefresh,
     Account,
     Library {
         section: library::LibrarySection,
@@ -61,7 +63,7 @@ pub enum Request {
 impl Request {
     pub fn validate(&self) -> Result<()> {
         match self {
-            Self::AuthStatus | Self::Account => Ok(()),
+            Self::AuthStatus | Self::AuthRefresh | Self::Account => Ok(()),
             Self::Library { continuation, .. } => continuation
                 .as_deref()
                 .map(|token| client::nonempty(token, "continuation"))
@@ -84,6 +86,7 @@ impl MusicClient {
         request.validate()?;
         let value = match request {
             Request::AuthStatus => serde_json::to_value(self.auth_status()?),
+            Request::AuthRefresh => serde_json::to_value(self.refresh_session()?),
             Request::Account => serde_json::to_value(self.account()?),
             Request::Library {
                 section,
