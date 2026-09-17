@@ -102,6 +102,8 @@ All six sections use the selected Music Web account. Use a returned `browse_id` 
 
 The result includes `url`, `itag`, `mime_type`, `bitrate`, `content_length`, `expires_at` (Unix seconds), `source_client`, and `http_headers`. Pass those playback headers along with the URL to your media player. No account cookies are included. `verification` records the HTTP status, bytes read, and content type of a successful probe. The core reads at most 4 KiB per probe and checks the byte range and container header. URLs can expire or be tied to the requesting IP; resolve again after expiry or a later playback failure. A successful initial probe does not guarantee the entire track will remain available.
 
+First use analyzes the current player script and can take tens of seconds. The process caches up to two prepared scripts, making subsequent calls faster; separate CLI invocations repeat that initial work. Reuse the Rust client or keep the shared library loaded for repeated playback.
+
 `player` exposes candidate formats without CDN probing; their `verification` field is `null`. Use `stream` when handing a URL to a player. This release was tested with real Opus and M4A CDN responses and one-second audio decoding; FFmpeg was used for validation only and is not a runtime dependency.
 
 Send a request through stdin:

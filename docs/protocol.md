@@ -120,9 +120,20 @@ Using the signed-in Windows browser session imported into encrypted Linux storag
 - All six search filters, album and artist pages, lyrics (3,432 characters), queue
   and queue continuation passed. Song search returned 20 items and another 20 on
   its continuation page. No personal library continuation was available to test.
-- Native Rust Web M4A resolution returned `WEB_REMIX`, itag 140, HTTP 206 and a
-  verified 4 KiB response. A 256 KiB sample decoded for one second with FFmpeg
-  exit 0. FFmpeg is validation-only, not a runtime dependency.
+- The optimized native CLI and C ABI verified the account and saved songs. Web
+  audio returned `WEB_REMIX`: M4A itag 141, Opus itag 774, and a Japanese track's
+  Opus itag 774 each passed HTTP 206 / 4 KiB probes. Each 256 KiB sample decoded
+  for one second with FFmpeg exit 0. FFmpeg is validation-only.
+- In one C ABI process, first M4A resolution took 22.57 seconds including player
+  preparation; subsequent WebM and Japanese-track calls took 5.56 and 4.09 seconds.
+  The cache is in-memory only: separate CLI processes repeat cold preparation.
+  These timings describe this machine/network, not a performance guarantee.
+- A stale browser profile was rejected explicitly; re-importing the current
+  browser session restored authenticated status and all account reads. Cookie
+  import was then selected as the local default.
+- 59 offline tests, fmt and clippy passed. One private-capture test is ignored in
+  CI and was run separately against the observed official player. Linux, Windows
+  and macOS CI all passed.
 
 These observations cover the tested account, region and tracks, not every account
 or full-track playback. No private results, signed URLs, credentials or audio
