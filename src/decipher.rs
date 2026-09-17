@@ -72,6 +72,7 @@ pub(crate) fn solve(
         });
     }
     let prepared = prepare(player)?;
+    crate::operation::phase("solving_challenges");
     let input = json!({
         "type": "preprocessed", "preprocessed_player": prepared.as_str(),
         "requests": [
