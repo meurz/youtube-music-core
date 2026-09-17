@@ -103,6 +103,71 @@ fn batch<T>(values: &[T], name: &str) -> Result<()> {
     }
     Ok(())
 }
+fn library_tokens(tokens: &[String]) -> Result<()> {
+    batch(tokens, "feedback_tokens")?;
+    for token in tokens {
+        nonempty(token, "feedback_token")?;
+        if token.len() > 32768 || token.chars().any(char::is_control) {
+            return Err(Error::InvalidInput("invalid feedback token".into()));
+        }
+    }
+    Ok(())
+}
+fn channel_id(id: &str) -> Result<()> {
+    identifier(id, "channel_id")?;
+    if !id.starts_with("UC") {
+        return Err(Error::InvalidInput(
+            "channel_id must be a UC channel identifier".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Validate every write before one-shot clients can bootstrap or send credentials.
+pub(crate) fn validate_request(request: &crate::Request) -> Result<()> {
+    use crate::Request;
+    match request {
+        Request::RateSong { video_id, .. } => validate_video_id(video_id),
+        Request::RatePlaylist {
+            playlist_id: id, ..
+        }
+        | Request::DeletePlaylist { playlist_id: id } => playlist_id(id).map(|_| ()),
+        Request::EditLibrary { feedback_tokens } => library_tokens(feedback_tokens),
+        Request::Subscribe { channel_id: id, .. } => channel_id(id),
+        Request::CreatePlaylist { options } => options.validate(),
+        Request::EditPlaylist {
+            playlist_id: id,
+            options,
+        } => {
+            playlist_id(id)?;
+            options.validate()
+        }
+        Request::AddPlaylistItems {
+            playlist_id: id,
+            video_ids,
+            allow_duplicates,
+        } => {
+            playlist_id(id)?;
+            added_actions(video_ids, *allow_duplicates).map(|_| ())
+        }
+        Request::RemovePlaylistItems {
+            playlist_id: id,
+            entries,
+        } => {
+            playlist_id(id)?;
+            removed_actions(entries).map(|_| ())
+        }
+        Request::MovePlaylistItem {
+            playlist_id: id,
+            set_video_id,
+            before_set_video_id,
+        } => {
+            playlist_id(id)?;
+            move_action(set_video_id, before_set_video_id.as_deref()).map(|_| ())
+        }
+        _ => Ok(()),
+    }
+}
 fn title(value: &str) -> Result<()> {
     nonempty(value, "title")?;
     if value.chars().count() > 150
@@ -286,29 +351,18 @@ impl MusicClient {
     /// Apply current server-provided add/remove-library feedback tokens. Tokens
     /// are account/state-specific; refresh the page before repeating an action.
     pub fn edit_library(&self, feedback_tokens: &[String]) -> Result<MutationResult> {
-        batch(feedback_tokens, "feedback_tokens")?;
-        for token in feedback_tokens {
-            nonempty(token, "feedback_token")?;
-            if token.len() > 32768 || token.chars().any(char::is_control) {
-                return Err(Error::InvalidInput("invalid feedback token".into()));
-            }
-        }
+        library_tokens(feedback_tokens)?;
         self.mutation("feedback", json!({"feedbackTokens":feedback_tokens}), false)
     }
-    pub fn subscribe_artist(&self, channel_id: &str, subscribed: bool) -> Result<MutationResult> {
-        identifier(channel_id, "channel_id")?;
-        if !channel_id.starts_with("UC") {
-            return Err(Error::InvalidInput(
-                "channel_id must be a UC channel identifier".into(),
-            ));
-        }
+    pub fn subscribe_artist(&self, id: &str, subscribed: bool) -> Result<MutationResult> {
+        channel_id(id)?;
         self.mutation(
             if subscribed {
                 "subscription/subscribe"
             } else {
                 "subscription/unsubscribe"
             },
-            json!({"channelIds":[channel_id]}),
+            json!({"channelIds":[id]}),
             false,
         )
     }
