@@ -1,16 +1,12 @@
-YouTube Music now uses its official Web client for the entire request chain.
+Music response Cookies were previously discarded. Version 0.6.0 applies server-issued updates during normal requests and adds explicit refresh, so active sessions can be maintained without reopening a browser.
 
-0.5.1 increases the bounded player stack to 2 MiB on an 8 MiB worker for Windows compiler compatibility. A nested-player regression covers the previous stack limit, and failures report fixed stack/time categories without exposing JavaScript errors or signed URLs.
+- Cookie updates stay scoped to HTTPS Music, honor root-path/domain/prefix/expiry rules, and update the next request signature. Expiry metadata survives secure storage; previous browser profiles remain readable.
+- The CLI verifies updates before encrypted persistence. Per-profile locks and compare-and-save preserve newer imports and logout. `ytmusic auth refresh` performs an explicit refresh and reports whether it saved changes. Normal command results survive an automatic-save failure with a sanitized warning.
+- Persistent C ABI handles provide create/call/export-session/destroy for desktop hosts. Only explicit export returns secret material; ordinary results and refresh output do not. Existing one-shot calls remain compatible.
+- A compilable .NET 8 wrapper demonstrates worker-thread calls, serialized session export and secure-persistence callbacks. The WinUI 3 guide separates host playback/UI responsibilities and prioritizes remaining core work.
 
-- Import the signed-in Music browser session with `ytmusic auth import --browser-port 9222`, `--headers-file FILE`, or `--stdin`. `auth login` opens Google's official page and explains the import step; there is no OAuth consent application or device-code flow.
-- Account verification, all six personal-library categories, search, browse, pagination, queue, lyrics and playback use WEB_REMIX. Android/VR/TV fallback and OAuth APIs were removed.
-- The native binary resolves Web signature and n challenges using a pinned parser in an embedded, resource-limited QuickJS context. No Node, Python, yt-dlp process or browser is needed after Cookie import. Static-script and CDN requests carry no account credentials.
-- Cookie sessions remain encrypted in Linux pass or Windows/macOS credential-backed storage. Re-import when the browser session expires or is revoked; independent Cookie renewal is not promised.
+Validation includes offline cookie, concurrency and native-handle tests, fmt/clippy, live encrypted-profile rotation/reload, and preservation of rejected profiles. Release validation also checks Windows CLI/DLL behavior.
 
-Migration: existing browser profiles remain compatible. Old OAuth profiles now report an explicit Cookie-import instruction. Import into the same profile to replace one only after successful account verification. Rust hosts migrate to BrowserSession; playback_client accepts auto or web_remix, both Web-only.
+Boundaries: refresh maintains valid sessions and cannot restore revoked credentials. Hosts schedule idle refresh and own secret storage; no background timer is installed. Native in-flight cancellation, total-operation deadlines, URL/script renewal policy, library writes and a complete WinUI player are not implemented. Cold Web player preparation still takes tens of seconds; reuse a persistent client. Playback probes do not guarantee full-track playback.
 
-Validation: 60 offline tests, fmt/clippy and three-platform CI passed. Live account import, all six library sections, six search filters, search/queue continuation, album/artist/playlist pages and lyrics passed. Native CLI/C ABI Web M4A and Opus (including a Japanese track) returned HTTP 206, and bounded samples decoded successfully. First resolution took about 23 seconds in one measured process; subsequent cached calls took 4–6 seconds. Separate CLI processes repeat initial preparation.
-
-Limitations: no PO-token generation, SABR, DRM, library writes or audio decoder. Google's private protocol, region restrictions and account requirements can change. A bounded initial CDN probe does not prove full-track playback.
-
-Native Linux x86_64/ARM64, Windows x86_64, and macOS Intel/Apple Silicon archives include the CLI, shared library, C header, documentation, third-party licenses, and SHA-256 checksums. Linux requires compatible glibc (2.39 or newer); macOS/Windows binaries are unsigned.
+Five-platform archives include the CLI, native library, C header, documentation, .NET example and third-party licenses. Verify SHA256SUMS before installing. Linux requires compatible glibc (2.39 or newer); Windows/macOS binaries are unsigned.

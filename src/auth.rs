@@ -14,10 +14,14 @@ const MAX_IMPORT: usize = 1024 * 1024;
 
 /// Secret material. Serialize only into a host-provided secure credential store.
 /// Debug intentionally redacts all fields.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BrowserSession {
     pub cookie: String,
+    /// Expiry of cookies learned from Set-Cookie, in Unix seconds.
+    /// Imported request headers do not carry expiry metadata.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub cookie_expirations: BTreeMap<String, i64>,
     #[serde(default)]
     pub auth_user: u32,
     #[serde(default)]
@@ -32,6 +36,7 @@ impl std::fmt::Debug for BrowserSession {
 
 impl BrowserSession {
     pub fn validate(&self) -> Result<()> {
+        crate::session::validate_expirations(&self.cookie_expirations)?;
         if self.cookie.is_empty() || self.cookie.len() > 65536 || self.auth_user > 99 {
             return Err(Error::InvalidInput(
                 "invalid browser session or account index (expected 0..99)".into(),
@@ -111,6 +116,7 @@ impl BrowserSession {
             }
         }
         let session = Self {
+            cookie_expirations: BTreeMap::new(),
             cookie: fields.remove("cookie").ok_or_else(|| {
                 Error::InvalidInput("browser headers contain no Cookie header".into())
             })?,
@@ -132,6 +138,7 @@ impl BrowserSession {
             return Err(Error::InvalidInput("session import exceeds 1 MiB".into()));
         }
         let mut cookies = BTreeMap::new();
+        let mut cookie_expirations = BTreeMap::new();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|_| Error::Protocol("system clock before Unix epoch".into()))?
@@ -171,6 +178,9 @@ impl BrowserSession {
                         .into(),
                 ));
             }
+            if expires != 0 {
+                cookie_expirations.insert(name.to_owned(), expires.min(i64::MAX as u64) as i64);
+            }
         }
         let session = Self {
             cookie: cookies
@@ -178,6 +188,7 @@ impl BrowserSession {
                 .map(|(k, v)| format!("{k}={v}"))
                 .collect::<Vec<_>>()
                 .join("; "),
+            cookie_expirations,
             auth_user: 0,
             delegated_session_id: None,
         };
@@ -188,6 +199,7 @@ impl BrowserSession {
     pub fn apply_to(&self, config: &mut Config) -> Result<()> {
         self.validate()?;
         config.cookie = Some(self.cookie.clone());
+        config.cookie_expirations = self.cookie_expirations.clone();
         config.auth_user = self.auth_user;
         config.delegated_session_id = self.delegated_session_id.clone();
         Ok(())
@@ -195,7 +207,7 @@ impl BrowserSession {
 }
 
 /// Credentials serialized only by the host's secure storage. Legacy browser JSON remains compatible.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum Session {
     Browser(BrowserSession),
@@ -330,44 +342,89 @@ pub(crate) fn parse_account(value: &Value, config: &Config) -> Result<AccountInf
     })
 }
 
+/// Refresh results contain account metadata, never credential values.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionRefresh {
+    pub state: AuthState,
+    pub updated: bool,
+    pub account: AccountInfo,
+}
+
 impl MusicClient {
     pub(crate) fn require_session(&self) -> Result<()> {
-        if self
-            .config
-            .cookie
-            .as_deref()
-            .and_then(|cookie| cookie_hash(cookie, 1))
-            .is_none()
-        {
-            return Err(Error::AuthenticationRequired);
+        let state = self.lock_session()?;
+        match state.cookie.as_deref() {
+            None => Err(Error::AuthenticationRequired),
+            Some(cookie) if cookie_hash(cookie, 1).is_some() => Ok(()),
+            Some(_) => Err(Error::AuthenticationRejected),
         }
-        Ok(())
     }
 
-    /// Verify the selected Music account remotely. Presence of a cookie is not proof.
-    pub fn account(&self) -> Result<AccountInfo> {
+    fn verified_account(&self) -> Result<(AccountInfo, Option<BrowserSession>)> {
         self.require_session()?;
-        let value = self.post("account/account_menu", json!({})).map_err(|e| {
+        self.post_validated("account/account_menu", json!({}), true, |value| {
+            parse_account(&value, &self.config)
+        })
+        .map_err(|e| {
             if matches!(e, Error::Http(401) | Error::Http(403)) {
                 Error::AuthenticationRejected
             } else {
                 e
             }
+        })
+    }
+
+    /// Verify the selected Music account remotely. Presence of a cookie is not proof.
+    pub fn account(&self) -> Result<AccountInfo> {
+        self.verified_account().map(|(account, _)| account)
+    }
+
+    /// Explicit secret export for secure host storage. Pending response cookies
+    /// are verified before export; failure never returns a replacement session.
+    /// This may make an account request. Do not serialize the result into logs.
+    pub fn browser_session(&self) -> Result<Option<BrowserSession>> {
+        {
+            let state = self.lock_session()?;
+            if state.cookie.is_none() {
+                return Ok(None);
+            }
+            if state.verified {
+                return state.snapshot(&self.config);
+            }
+        }
+        self.verified_account().map(|(_, session)| session)
+    }
+
+    /// Visit the official Music homepage, apply server-issued cookies, and verify
+    /// the selected account. Hosts may schedule this while their app is active.
+    /// This cannot restore a revoked session and performs no browser import.
+    pub fn refresh_session(&self) -> Result<SessionRefresh> {
+        self.require_session()?;
+        let before = self.lock_session()?.snapshot(&self.config)?;
+        self.music_page("/").map_err(|error| {
+            if matches!(error, Error::Http(401) | Error::Http(403)) {
+                Error::AuthenticationRejected
+            } else {
+                error
+            }
         })?;
-        parse_account(&value, &self.config)
+        let (account, after) = self.verified_account()?;
+        Ok(SessionRefresh {
+            state: AuthState::Authenticated,
+            updated: before != after,
+            account,
+        })
     }
 
     pub fn auth_status(&self) -> Result<AuthStatus> {
-        if self.require_session().is_err() {
-            return Ok(AuthStatus {
-                state: AuthState::SignedOut,
-                account: None,
-            });
-        }
         match self.account() {
             Ok(account) => Ok(AuthStatus {
                 state: AuthState::Authenticated,
                 account: Some(account),
+            }),
+            Err(Error::AuthenticationRequired) => Ok(AuthStatus {
+                state: AuthState::SignedOut,
+                account: None,
             }),
             Err(Error::AuthenticationRejected) => Ok(AuthStatus {
                 state: AuthState::Rejected,

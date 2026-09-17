@@ -97,6 +97,7 @@ fn session_from_snapshot(snapshot: &Value, headers: &Value) -> Result<BrowserSes
         .ok_or_else(|| failure("browser request has no Cookie header"))?;
     let session = BrowserSession {
         cookie: cookie.into(),
+        cookie_expirations: Default::default(),
         auth_user,
         delegated_session_id: snapshot["delegated_session_id"].as_str().map(str::to_owned),
     };

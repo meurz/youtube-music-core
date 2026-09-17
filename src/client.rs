@@ -7,12 +7,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 use std::{
+    collections::BTreeMap,
     io::Read,
-    sync::OnceLock,
+    sync::{Mutex, MutexGuard, OnceLock},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-const ORIGIN: &str = "https://music.youtube.com";
+pub(crate) const ORIGIN: &str = "https://music.youtube.com";
 const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 
@@ -24,6 +25,7 @@ pub struct Config {
     pub client_version: Option<String>,
     pub visitor_data: Option<String>,
     pub cookie: Option<String>,
+    pub cookie_expirations: BTreeMap<String, i64>,
     pub po_token: Option<String>,
     pub proxy: Option<String>,
     pub timeout_seconds: u64,
@@ -40,6 +42,7 @@ struct ConfigFields {
     pub client_version: Option<String>,
     pub visitor_data: Option<String>,
     pub cookie: Option<String>,
+    pub cookie_expirations: BTreeMap<String, i64>,
     pub po_token: Option<String>,
     pub proxy: Option<String>,
     pub timeout_seconds: u64,
@@ -57,6 +60,7 @@ impl Default for ConfigFields {
             client_version: config.client_version,
             visitor_data: config.visitor_data,
             cookie: config.cookie,
+            cookie_expirations: config.cookie_expirations,
             po_token: config.po_token,
             proxy: config.proxy,
             timeout_seconds: config.timeout_seconds,
@@ -94,6 +98,7 @@ impl Default for Config {
             client_version: None,
             visitor_data: None,
             cookie: None,
+            cookie_expirations: BTreeMap::new(),
             po_token: None,
             proxy: None,
             timeout_seconds: 30,
@@ -108,6 +113,7 @@ pub struct MusicClient {
     pub(crate) http: Client,
     pub(crate) config: Config,
     pub(crate) web_player: OnceLock<crate::playback::WebPlayerScript>,
+    pub(crate) session: Mutex<crate::session::CookieState>,
 }
 
 pub(crate) fn network(e: reqwest::Error) -> Error {
@@ -204,12 +210,6 @@ impl MusicClient {
                 "timeout_seconds must be between 1 and 300".into(),
             ));
         }
-        let mut headers = HeaderMap::new();
-        header(&mut headers, "origin", ORIGIN)?;
-        header(&mut headers, "referer", &format!("{ORIGIN}/"))?;
-        if let Some(cookie) = &config.cookie {
-            header(&mut headers, "cookie", cookie)?;
-        }
         let mut builder = Client::builder()
             .user_agent(UA)
             .timeout(Duration::from_secs(config.timeout_seconds))
@@ -221,25 +221,78 @@ impl MusicClient {
             );
         }
         let http = builder.build().map_err(network)?;
-        if config.client_version.is_none() {
-            let html =
-                checked_response(http.get(ORIGIN).headers(headers).send().map_err(network)?)?;
-            config.client_version = Some(config_string(&html, "INNERTUBE_CLIENT_VERSION").ok_or_else(|| Error::Protocol("web client bootstrap failed; provide client_version if consent or regional restrictions block the homepage".into()))?);
-            if config.visitor_data.is_none() {
-                config.visitor_data = config_string(&html, "VISITOR_DATA");
-            }
-        }
-        Ok(Self {
+        let session = crate::session::CookieState::new(
+            config.cookie.take(),
+            std::mem::take(&mut config.cookie_expirations),
+        )?;
+        let mut client = Self {
             http,
             config,
+            session: Mutex::new(session),
             web_player: OnceLock::new(),
-        })
+        };
+        if client.config.client_version.is_none() {
+            let html = client.music_page("/")?;
+            client.config.client_version = Some(config_string(&html, "INNERTUBE_CLIENT_VERSION").ok_or_else(|| Error::Protocol("web client bootstrap failed; provide client_version if consent or regional restrictions block the homepage".into()))?);
+            if client.config.visitor_data.is_none() {
+                client.config.visitor_data = config_string(&html, "VISITOR_DATA");
+            }
+        }
+        Ok(client)
     }
 
+    pub(crate) fn lock_session(&self) -> Result<MutexGuard<'_, crate::session::CookieState>> {
+        let mut state = self
+            .session
+            .lock()
+            .map_err(|_| Error::Protocol("session lock unavailable".into()))?;
+        state.purge(crate::session::now()?);
+        Ok(state)
+    }
+
+    /// Session-bearing HTML requests stay on the exact Music origin. Script and
+    /// media downloads continue using the credential-free HTTP client directly.
+    pub(crate) fn music_page(&self, path: &str) -> Result<String> {
+        if !(path == "/" || path.starts_with("/watch?v=")) {
+            return Err(Error::InvalidInput("unsupported Music page".into()));
+        }
+        let url = reqwest::Url::parse(&format!("{ORIGIN}{path}"))
+            .map_err(|_| Error::InvalidInput("invalid Music page".into()))?;
+        let mut state = self.lock_session()?;
+        let mut headers = HeaderMap::new();
+        if let Some(cookie) = &state.cookie {
+            header(&mut headers, "cookie", cookie)?;
+        }
+        let response = self
+            .http
+            .get(url.clone())
+            .headers(headers)
+            .send()
+            .map_err(network)?;
+        if matches!(response.status().as_u16(), 401 | 403) {
+            state.verified = false;
+        }
+        let headers = response.headers().clone();
+        let body = checked_response(response)?;
+        state.observe(&url, &headers, crate::session::now()?)?;
+        Ok(body)
+    }
+
+    #[cfg(test)]
     fn web_request(
         &self,
         endpoint: &str,
+        body: Value,
+    ) -> Result<reqwest::blocking::RequestBuilder> {
+        let state = self.lock_session()?;
+        self.web_request_with_cookie(endpoint, body, state.cookie.as_deref())
+    }
+
+    fn web_request_with_cookie(
+        &self,
+        endpoint: &str,
         mut body: Value,
+        cookie: Option<&str>,
     ) -> Result<reqwest::blocking::RequestBuilder> {
         let mut client = json!({"clientName":"WEB_REMIX", "clientVersion":self.config.client_version, "hl":self.config.language, "gl":self.config.country});
         let mut headers = HeaderMap::new();
@@ -255,7 +308,7 @@ impl MusicClient {
             client["visitorData"] = visitor.clone().into();
             header(&mut headers, "x-goog-visitor-id", visitor)?;
         }
-        if let Some(cookie) = &self.config.cookie {
+        if let Some(cookie) = cookie {
             header(&mut headers, "cookie", cookie)?;
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -286,17 +339,57 @@ impl MusicClient {
     }
 
     pub(crate) fn post(&self, endpoint: &str, body: Value) -> Result<Value> {
-        let response = self.web_request(endpoint, body)?.send().map_err(network)?;
+        self.post_validated(endpoint, body, false, Ok)
+            .map(|(value, _)| value)
+    }
+
+    // Hold the session lock through request signing and response application so
+    // older concurrent responses cannot replace newer server-issued cookies.
+    pub(crate) fn post_validated<T>(
+        &self,
+        endpoint: &str,
+        body: Value,
+        verify_session: bool,
+        parse: impl FnOnce(Value) -> Result<T>,
+    ) -> Result<(T, Option<crate::auth::BrowserSession>)> {
+        let mut state = self.lock_session()?;
+        let response = self
+            .web_request_with_cookie(endpoint, body, state.cookie.as_deref())?
+            .send()
+            .map_err(network)?;
+        if matches!(response.status().as_u16(), 401 | 403) {
+            state.verified = false;
+        }
+        let url = response.url().clone();
+        let headers = response.headers().clone();
         let value: Value = serde_json::from_str(&checked_response(response)?)
             .map_err(|_| Error::Protocol("API returned invalid JSON".into()))?;
+        if state.cookie.is_some() && crate::auth::explicitly_signed_out(&value) {
+            state.verified = false;
+            return Err(Error::AuthenticationRejected);
+        }
         if let Some(error) = value.get("error") {
-            // Upstream messages may reflect submitted values; expose only a numeric code.
             return Err(Error::Protocol(match error["code"].as_u64() {
                 Some(code) => format!("API error {code}"),
                 None => "API returned an error".into(),
             }));
         }
-        Ok(value)
+        let parsed = parse(value).inspect_err(|_| {
+            if verify_session {
+                state.verified = false;
+            }
+        })?;
+        state.observe(&url, &headers, crate::session::now()?)?;
+        let snapshot = if verify_session {
+            let snapshot = state
+                .snapshot(&self.config)
+                .map_err(|_| Error::AuthenticationRejected)?;
+            state.verified = true;
+            snapshot
+        } else {
+            None
+        };
+        Ok((parsed, snapshot))
     }
 
     pub fn search(&self, query: &str, filter: SearchFilter) -> Result<Page> {
@@ -514,6 +607,80 @@ mod tests {
         );
         assert_eq!(cookie_hash("__Secure-3PAPISID=abc", 123), Some(expected));
         assert_eq!(cookie_hash("SAPISID=; other=x", 123), None);
+    }
+
+    #[test]
+    fn rotated_signer_is_used_on_the_next_request_and_never_on_static_downloads() {
+        let client = MusicClient::new(Config {
+            client_version: Some("test".into()),
+            cookie: Some("SAPISID=old".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            reqwest::header::SET_COOKIE,
+            "SAPISID=new; Path=/; Domain=.youtube.com; Secure"
+                .parse()
+                .unwrap(),
+        );
+        client
+            .lock_session()
+            .unwrap()
+            .observe(
+                &reqwest::Url::parse(ORIGIN).unwrap(),
+                &headers,
+                crate::session::now().unwrap(),
+            )
+            .unwrap();
+        let request = client
+            .web_request("browse", json!({}))
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(request.headers()["cookie"], "SAPISID=new");
+        let signed = request.headers()["authorization"].to_str().unwrap();
+        let timestamp: u64 = signed
+            .strip_prefix("SAPISIDHASH ")
+            .unwrap()
+            .split('_')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            Some(signed.to_owned()),
+            cookie_hash("SAPISID=new", timestamp)
+        );
+        let static_request = client
+            .http
+            .get("https://music.youtube.com/s/player/test/base.js")
+            .build()
+            .unwrap();
+        assert!(!static_request.headers().contains_key("cookie"));
+        assert!(!static_request.headers().contains_key("authorization"));
+    }
+
+    #[test]
+    fn expired_signing_cookie_reports_reauthentication_without_exporting_secrets() {
+        let client = MusicClient::new(Config {
+            client_version: Some("test".into()),
+            cookie: Some("SAPISID=private-expired".into()),
+            cookie_expirations: BTreeMap::from([("SAPISID".into(), 1)]),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            client.auth_status().unwrap().state,
+            crate::auth::AuthState::Rejected
+        );
+        let error = client.browser_session().unwrap_err();
+        assert!(matches!(error, Error::AuthenticationRejected));
+        assert!(!error.to_string().contains("private-expired"));
+        assert!(matches!(
+            client.refresh_session(),
+            Err(Error::AuthenticationRejected)
+        ));
     }
 
     #[test]

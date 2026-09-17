@@ -2,7 +2,7 @@
 
 ## Transport
 
-Version 0.5 uses `WEB_REMIX` for every Innertube operation. It does not send TV,
+Version 0.6 uses `WEB_REMIX` for every Innertube operation. It does not send TV,
 Android Music, or Android VR requests, even as a playback fallback. The service is
 YouTube's official Web backend; this library itself is unofficial.
 
@@ -63,10 +63,34 @@ and CDN probes receive no account credentials. API and script redirects are
 rejected. Account/Cookie input and upstream JavaScript errors are not printed.
 `--anonymous` bypasses stored profiles and clears configured account/visitor data.
 
-Cookie sessions can expire or be revoked. There is no OAuth refresh grant and no
-guaranteed independent Cookie renewal. Re-import a current browser session after
-authentication rejection. The browser is not required for subsequent API calls or
-stream resolution.
+Music homepage, watch-page and successful API responses can rotate Cookies.
+The core serializes session-bearing requests and applies Set-Cookie only from the
+exact HTTPS Music origin. It accepts applicable root-scoped cookies, validates
+Domain and __Secure-/__Host-/__Http- restrictions, handles Max-Age/Expires and
+deletions, and ignores narrow-path or partitioned updates that cannot safely be
+represented by a request-header import. Existing unrelated duplicate preferences
+are retained. Learned expiry metadata survives serialization; imported request
+headers do not contain expiry dates. Anonymous clients do not accumulate cookies.
+
+Updates are used for subsequent request signing. A host must explicitly obtain
+`browser_session()` / `ytmusic_client_export_session` for persistence; pending
+cookies are account-verified before export. Rejected or malformed account
+responses do not provide a replacement session. CLI operations save verified
+changes automatically to the existing encrypted profile. Per-profile file locks
+and compare-and-save prevent a late response from overwriting a newer CLI import
+or logout; independent external pass writers do not participate in those locks.
+Config-file credentials are not silently copied to the CLI profile.
+
+`auth refresh` / `auth_refresh` visits the Music homepage and verifies the account;
+ordinary requests also consume response updates. Hosts may schedule refresh while
+active; the core does not start background timers. Normal CLI data remains available
+when automatic persistence fails (a sanitized warning goes to stderr), while an
+explicit refresh fails if verification or storage fails. Refresh output contains
+only metadata; CLI `saved` reports whether this call persisted a changed profile.
+
+This maintains an active session without a browser process, not an OAuth refresh
+grant or recovery of revoked credentials. Re-import a current browser session
+after authentication rejection. Long-duration login retention is not guaranteed.
 
 ## Web audio resolution
 
@@ -131,10 +155,23 @@ Using the signed-in Windows browser session imported into encrypted Linux storag
 - A stale browser profile was rejected explicitly; re-importing the current
   browser session restored authenticated status and all account reads. Cookie
   import was then selected as the local default.
-- 59 offline tests, fmt and clippy passed. One private-capture test is ignored in
+- The original Web migration passed 59 offline tests, fmt and clippy. One private-capture test is ignored in
   CI and was run separately against the observed official player. Linux, Windows
   and macOS CI all passed.
 
 These observations cover the tested account, region and tracks, not every account
 or full-track playback. No private results, signed URLs, credentials or audio
 samples are published.
+
+
+### Session maintenance and desktop bridge — 0.6
+
+Offline coverage includes cookie expiry/Max-Age precedence, source/domain/path and
+prefix restrictions, anonymous isolation, signing with rotated cookies, profile
+compare-and-save under concurrent writers, stale/native handle lifecycle, and
+explicit secret export. The .NET 8 example is compiled in Windows CI.
+
+Live Linux validation observed a changed encrypted profile and three persisted
+expiry records after refresh, followed by authenticated status and five saved
+artists from a new process. Rejected sessions failed refresh without changing the
+stored credential. This demonstrates rotation/persistence, not indefinite renewal.

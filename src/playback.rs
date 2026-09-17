@@ -1,9 +1,9 @@
 use crate::{
-    client::{checked_response, config_string, header, network, validate_video_id},
+    client::{checked_response, config_string, network, validate_video_id},
     model::{AudioFormat, AudioStream, Player, StreamVerification},
     parse, Error, MusicClient, Result,
 };
-use reqwest::{blocking::Response, header::HeaderMap, Url};
+use reqwest::{blocking::Response, Url};
 use serde_json::{json, Value};
 use std::{
     collections::BTreeSet,
@@ -212,17 +212,7 @@ fn parse_web_player(mut raw: Value, script: &str, video_id: &str) -> Result<Play
 impl MusicClient {
     fn web_player_script(&self, video_id: &str) -> Result<&WebPlayerScript> {
         if self.web_player.get().is_none() {
-            let mut headers = HeaderMap::new();
-            if let Some(cookie) = &self.config.cookie {
-                header(&mut headers, "cookie", cookie)?;
-            }
-            let html = checked_response(
-                self.http
-                    .get(format!("https://music.youtube.com/watch?v={video_id}"))
-                    .headers(headers)
-                    .send()
-                    .map_err(network)?,
-            )?;
+            let html = self.music_page(&format!("/watch?v={video_id}"))?;
             let url = player_script_url(&html)?;
             // Static player code needs no account headers. Reject all redirects.
             let source = checked_response(self.http.get(url).send().map_err(network)?)?;

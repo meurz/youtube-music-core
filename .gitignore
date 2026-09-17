@@ -4,3 +4,5 @@
 *cookies*
 *.har
 *.log
+/examples/dotnet/bin/
+/examples/dotnet/obj/
