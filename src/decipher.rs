@@ -181,7 +181,8 @@ fn evaluate_with_memory_limit(
 }
 
 fn evaluate_inner(input: &str, budget: Duration, memory_bytes: usize) -> Result<String> {
-    let rt = Runtime::new().map_err(|_| failure("cannot initialize player solver"))?;
+    crate::operation::check()?;
+    let rt = Runtime::new().map_err(|_| operation_failure("cannot initialize player solver"))?;
     rt.set_memory_limit(memory_bytes);
     rt.set_gc_threshold(64 * 1024 * 1024);
     rt.set_max_stack_size(STACK_BYTES);
@@ -190,12 +191,19 @@ fn evaluate_inner(input: &str, budget: Duration, memory_bytes: usize) -> Result<
     rt.set_interrupt_handler(Some(Box::new(move || {
         start.elapsed() >= budget || operation.as_ref().is_some_and(|op| op.check().is_err())
     })));
-    let ctx = Context::full(&rt).map_err(|_| failure("cannot initialize player solver context"))?;
+    let ctx = Context::full(&rt).map_err(|_| {
+        if start.elapsed() >= budget {
+            Error::Timeout
+        } else {
+            operation_failure("cannot initialize player solver context")
+        }
+    })?;
     ctx.with(|ctx| {
+        crate::operation::check()?;
         // A data binding keeps player text and challenges out of generated code.
         ctx.globals()
             .set("__solver_input", input)
-            .map_err(|_| failure("cannot initialize player solver input"))?;
+            .map_err(|_| operation_failure("cannot initialize player solver input"))?;
         ctx.eval::<(), _>(LIBRARY)
             .and_then(|_| ctx.eval::<(), _>(AST_BINDINGS))
             .and_then(|_| ctx.eval::<(), _>(SOLVER))
@@ -252,6 +260,12 @@ fn collect(response: &Value, challenges: &[String]) -> Result<HashMap<String, St
             Ok((challenge.clone(), result.to_owned()))
         })
         .collect()
+}
+
+fn operation_failure(message: &str) -> Error {
+    crate::operation::check()
+        .err()
+        .unwrap_or_else(|| failure(message))
 }
 
 fn failure(message: &str) -> Error {
@@ -360,7 +374,10 @@ mod tests {
     fn operation_interrupts_active_javascript_and_worker_inherits_deadline() {
         use crate::operation::{OperationContext, OperationOptions};
         for cancel in [false, true] {
-            let context = OperationContext::new(OperationOptions { timeout_ms: 150 }).unwrap();
+            let context = OperationContext::new(OperationOptions {
+                timeout_ms: if cancel { 5000 } else { 150 },
+            })
+            .unwrap();
             let controller = context.clone();
             let input = json!({"type":"preprocessed", "preprocessed_player":"while(true) {}", "requests":[]}).to_string();
             let worker = std::thread::spawn(move || context.run(|| evaluate(&input, TIME_BUDGET)));
