@@ -1,9 +1,10 @@
-# Web attestation, SABR and protected playback
+# Web attestation and SABR audio
 
-Version 0.8 adds three distinct delivery paths while retaining `WEB_REMIX` and
-imported Music sessions. Use the [Windows official-player helper](../examples/dotnet/web-player/README.md)
-when the host needs the browser's attestation VM or licensed CDM. Ordinary direct
-URL playback and native SABR do not require a browser when the server permits them.
+Version 0.9 provides native SABR audio and optional browser attestation while
+retaining `WEB_REMIX` and imported Music sessions. The optional
+[Windows attestation helper](../examples/dotnet/web-attestation/README.md) generates
+PO tokens for the native core. Ordinary direct URL playback and native SABR do
+not require a browser when the server permits them.
 
 ## Proof of Origin
 
@@ -24,7 +25,7 @@ Keep a signed-in Music player tab open. The saved core profile and browser must
 have the same signing session and selected identity. The CLI captures Music-only
 request headers before and after generation, rejects account changes, and does
 not print or persist the minted tokens. A Windows host can instead use
-`OfficialWebPlayer.RefreshPoTokensAsync` on its dedicated WebView2.
+`OfficialBrowserAttestation.RefreshPoTokensAsync` on its dedicated WebView2.
 
 Native hosts can provide `Config.po_tokens` or call `set_po_tokens` with a maximum
 of 16 `PoTokenBundle` values: `video_id`, `player_token`, `gvs_token`, `expires_at`,
@@ -92,32 +93,8 @@ closing its handle. One-shot C calls cannot retain SABR handles.
 `ytmusic sabr VIDEO --output FILE` runs the complete transfer in one process and
 publishes a new file only after completion, without overwriting an existing file.
 The original AAC fragmented-MP4 edit-list issue in Windows' direct-file pipeline
-still applies; use a compatible demuxer/adaptive path, WebM, or the official Web
-player. An offline complete-file test does not prove a host's progressive SABR
+still applies; use a compatible native demuxer/adaptive path or WebM. An offline complete-file test does not prove a host's progressive SABR
 playback implementation. Live broadcasts are not supported by this VOD reader.
-
-## DRM and the official player
-
-Encrypted formats are excluded from clear direct URLs, clear DASH and native
-SABR candidates. `player.drm` reports families, key systems and the official watch
-route without exposing license URLs or DRM challenges. `drm_required` tells the
-host to use a licensed player. `official_playback` is a local operation returning
-the official Music watch page for a validated video ID, even if native bootstrap
-or media access is unavailable.
-
-The optional Windows helper loads that real page in a host-owned WebView2. The
-page handles EME, CDM selection and official license acquisition. The helper
-supports key-system probing, playback, pause, seek and state; probe the actual
-runtime instead of assuming every installation has Widevine or PlayReady.
-`DrmRouteAsync` selects the embedded official page or indicates that a compatible
-full browser is needed. A CDM capability probe never claims a license was granted.
-
-Use a dedicated protected WebView profile. Cookie-header import cannot reconstruct
-partitioned cookies and rejects ambiguous duplicates; use official-page login when
-necessary. Non-default/brand identity selection stays in the official page and
-must be verified. The core neither extracts content keys nor implements its own
-CDM. Account, purchase/subscription, region and device license requirements remain
-in force. A compatible CDM does not grant access to an unauthorized track.
 
 ## Validation evidence
 
@@ -128,8 +105,17 @@ completed full tracks, produced decodable original media, and passed mid-track
 seek tests. Offline tests cover framing limits, malformed protobufs, transactional
 segments, redirect validation, proof state and actual HTTP cancellation.
 
-On the tested Windows WebView2 runtime, the official Music page passed playback,
-seek and pause. A public, authorized Widevine test vector separately passed license
-responses, usable keys, real playback-clock advancement, seek and full encrypted
-playback to natural end. No known DRM-protected YouTube track was supplied, so a
-YouTube account's encrypted-track license is not claimed as live-verified.
+The Windows attestation helper checks the imported signing session and selected
+account before and after minting. It does not provide a playback API. The native
+host owns audio decoding, playback controls and media integration.
+
+## Migrating from 0.8
+
+Version 0.9 uses JSON protocol 2.0 and retains C ABI 2. The `official_playback`
+operation, CLI `official-playback` command, `Player.drm` descriptor, `drm_required`
+error and browser playback/CDM helpers have been removed. Hosts should discover
+operations through `capabilities` and use native stream, DASH or SABR delivery.
+The optional .NET attestation helper moves from `web-player` to `web-attestation`
+and is named `OfficialBrowserAttestation`. PO token and SABR requests are unchanged.
+Unsupported encrypted formats remain excluded from audio candidates; there is no
+license acquisition or browser playback fallback.

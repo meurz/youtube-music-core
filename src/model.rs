@@ -180,8 +180,6 @@ pub struct Player {
     #[serde(default)]
     pub sabr: Option<crate::delivery::SabrDescriptor>,
     #[serde(default)]
-    pub drm: Option<crate::drm::DrmPlayback>,
-    #[serde(default)]
     pub source_client: Option<String>,
     pub track: Option<Track>,
     pub status: String,

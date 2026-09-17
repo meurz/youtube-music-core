@@ -416,7 +416,7 @@ mod tests {
         assert_eq!(ytmusic_abi_version(), 2);
         assert_eq!(
             read(ytmusic_capabilities())["data"]["protocol_version"],
-            "1.2"
+            "2.0"
         );
     }
 

@@ -47,7 +47,7 @@ pub(crate) fn parse_sabr(raw: &Value, resolved: bool) -> Option<SabrDescriptor> 
         .iter()
         .filter_map(|v| {
             let mime = v["mimeType"].as_str()?;
-            if !mime.starts_with("audio/") || crate::drm::is_encrypted_format(v) {
+            if !mime.starts_with("audio/") || crate::parse::is_encrypted_format(v) {
                 return None;
             }
             Some(SabrFormat {

@@ -182,7 +182,7 @@ fn collect_audio(raw: &Value) -> Result<Vec<PendingAudio>> {
         .flatten()
         .enumerate()
     {
-        if crate::drm::is_encrypted_format(format) {
+        if crate::parse::is_encrypted_format(format) {
             continue;
         }
         if !format["mimeType"]
@@ -643,9 +643,6 @@ fn select_verified(
     if player.audio_streams.is_empty() {
         if player.sabr.is_some() {
             return Err(Error::SabrRequired);
-        }
-        if player.drm.is_some() {
-            return Err(Error::DrmRequired);
         }
         return Err(player
             .resolution_error

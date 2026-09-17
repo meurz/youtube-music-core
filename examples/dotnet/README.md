@@ -173,11 +173,12 @@ interop through a local proxy sink, including cancellation, deadlines, progress
 observer failure, handle cleanup and disposal. It requires no account or external
 network access.
 
-## Optional official browser playback
+## Optional browser attestation
 
-Use the [WebView2 project](web-player/README.md) for official-page Proof of Origin
-generation and licensed DRM playback. Its WinRT projection supports WinUI 3;
-WPF/WinForms hosts can build the managed projection. The native core remains
-independent of WebView2 for ordinary requests and permitted clear SABR delivery.
+Use the [attestation project](web-attestation/README.md) for official-page PO token
+generation. Its WinRT projection supports WinUI 3; WPF/WinForms hosts can build
+the managed projection. The helper exposes session import and proof generation;
+audio playback stays in the native host. Ordinary native requests and permitted
+SABR delivery do not depend on WebView2.
 See the [SABR handle API](../../docs/web-delivery.md) for native media segments;
 these need a host demuxer and are not ordinary MediaPlayer URLs.

@@ -24,8 +24,6 @@ pub enum Error {
         "no usable Web audio URL; the player may require additional attestation or unsupported delivery"
     )]
     StreamResolutionRequired,
-    #[error("protected audio requires the official player and a compatible licensed browser CDM")]
-    DrmRequired,
     #[error("Web audio uses SABR; open a native SABR session to read its media segments")]
     SabrRequired,
     #[error("SABR requires a fresh official Web playback context")]
@@ -72,7 +70,6 @@ impl Error {
             Self::Protocol(_) => "protocol",
             Self::Unplayable { .. } => "unplayable",
             Self::StreamResolutionRequired => "stream_resolution_required",
-            Self::DrmRequired => "drm_required",
             Self::SabrRequired => "sabr_required",
             Self::SabrReloadRequired => "sabr_reload_required",
             Self::PoTokenRequired => "po_token_required",
