@@ -1,0 +1,81 @@
+---
+source: src/client/music_search.rs
+expression: map_res.c
+---
+MusicSearchSuggestion(
+  terms: [
+    "taylor swift",
+    "tkkg",
+    "theo mach mir ein bananenbrot",
+    "techno",
+  ],
+  items: [
+    Artist(ArtistItem(
+      id: "UCPC0L1d253x-KuMNwa05TpA",
+      name: "Taylor Swift",
+      avatar: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/U1cI80giSCUuNYx3zkRPt_AWytN1qFMlQoL5F7kTZeFzfIMmfHJYLJchX3BxeDLglE9MeVYp4OlN5Xc=w60-h60-p-l90-rj",
+          width: 60,
+          height: 60,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/U1cI80giSCUuNYx3zkRPt_AWytN1qFMlQoL5F7kTZeFzfIMmfHJYLJchX3BxeDLglE9MeVYp4OlN5Xc=w120-h120-p-l90-rj",
+          width: 120,
+          height: 120,
+        ),
+      ],
+      subscriber_count: None,
+    )),
+    Artist(ArtistItem(
+      id: "UCyiY-0Af0O6emoI3YvCEDaA",
+      name: "TKKG",
+      avatar: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/Y6iWyltVsuHYON5C7CvByIWYccxq_ZAw2UZiEMfYY4PlwzcNb54EmP3xHSFRn6ZWpLftvbXGTNkTchjq=w60-h60-l90-rj",
+          width: 60,
+          height: 60,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/Y6iWyltVsuHYON5C7CvByIWYccxq_ZAw2UZiEMfYY4PlwzcNb54EmP3xHSFRn6ZWpLftvbXGTNkTchjq=w120-h120-l90-rj",
+          width: 120,
+          height: 120,
+        ),
+      ],
+      subscriber_count: None,
+    )),
+    Track(TrackItem(
+      id: "0pnFvmuXwgg",
+      name: "Theo (Der Bananenbrot-Song)",
+      duration: None,
+      cover: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/x3Hn5hbqoPgf7D_JXotEAyUFTvdG_QwbfDqMqT-zdBgArAlqLlbYMN2FAWO5iwKkmcm-l_hUL4WtZd9u=w60-h60-s-l90-rj",
+          width: 60,
+          height: 60,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/x3Hn5hbqoPgf7D_JXotEAyUFTvdG_QwbfDqMqT-zdBgArAlqLlbYMN2FAWO5iwKkmcm-l_hUL4WtZd9u=w120-h120-s-l90-rj",
+          width: 120,
+          height: 120,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UC56hLMPuEsERdmTBbR_JGHA"),
+          name: "Rolf Zuckowski & seine Freunde",
+        ),
+      ],
+      artist_id: Some("UC56hLMPuEsERdmTBbR_JGHA"),
+      album: Some(AlbumId(
+        id: "MPREb_kz546sNB1mH",
+        name: "Was Spaß macht...",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: None,
+      by_va: false,
+      unavailable: false,
+    )),
+  ],
+)

@@ -1,0 +1,29 @@
+---
+source: src/client/channel.rs
+expression: map_res.c
+---
+ChannelInfo(
+  id: "UC2DjFE7Xf11URZqWBigcVOQ",
+  url: "http://www.youtube.com/@EEVblog",
+  description: "NO SCRIPT, NO FEAR, ALL OPINION\nAn off-the-cuff Video Blog about Electronics Engineering, for engineers, hobbyists, enthusiasts, hackers and Makers\nHosted by Dave Jones from Sydney Australia\n\nDONATIONS:\nBitcoin: 3KqyH1U3qrMPnkLufM2oHDU7YB4zVZeFyZ\nEthereum: 0x99ccc4d2654ba40744a1f678d9868ecb15e91206\nPayPal: david@alternatezone.com\n\nPatreon: https://www.patreon.com/eevblog\n\nEEVblog2: http://www.youtube.com/EEVblog2\nEEVdiscover: https://www.youtube.com/channel/UCkGvUEt8iQLmq3aJIMjT2qQ\n\nEMAIL:\nAdvertising/Commercial: eevblog+business@gmail.com\nFan mail: eevblog+fan@gmail.com\nHate Mail: eevblog+hate@gmail.com\n\nI DON\'T DO PAID VIDEO SPONSORSHIPS, DON\'T ASK!\n\nPLEASE:\nDo NOT ask for personal advice on something, post it in the EEVblog forum.\nI read ALL email, but please don\'t be offended if I don\'t have time to reply, I get a LOT of email.\n\nMailbag\nPO Box 7949\nBaulkham Hills NSW 2153\nAUSTRALIA",
+  subscriber_count: Some(920000),
+  video_count: Some(1920),
+  create_date: Some("2009-04-04"),
+  view_count: Some(199087682),
+  country: Some(AU),
+  links: [
+    ("EEVblog Web Site", "http://www.eevblog.com/"),
+    ("Twitter", "http://www.twitter.com/eevblog"),
+    ("Facebook", "http://www.facebook.com/EEVblog"),
+    ("EEVdiscover", "https://www.youtube.com/channel/UCkGvUEt8iQLmq3aJIMjT2qQ"),
+    ("The EEVblog Forum", "http://www.eevblog.com/forum"),
+    ("EEVblog Merchandise (T-Shirts)", "http://www.eevblog.com/merch"),
+    ("EEVblog Donations", "http://www.eevblog.com/donations/"),
+    ("Patreon", "https://www.patreon.com/eevblog"),
+    ("SubscribeStar", "https://www.subscribestar.com/eevblog"),
+    ("The AmpHour Radio Show", "http://www.theamphour.com/"),
+    ("Flickr", "http://www.flickr.com/photos/eevblog"),
+    ("EEVblog AMAZON Store", "http://www.amazon.com/gp/redirect.html?ie=UTF8&location=http%3A%2F%2Fwww.amazon.com%2F&tag=ee04-20&linkCode=ur2&camp=1789&creative=390957"),
+    ("2nd EEVblog Channel", "http://www.youtube.com/EEVblog2"),
+  ],
+)

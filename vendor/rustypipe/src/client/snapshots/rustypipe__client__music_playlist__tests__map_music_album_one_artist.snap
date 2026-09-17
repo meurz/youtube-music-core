@@ -1,0 +1,469 @@
+---
+source: src/client/music_playlist.rs
+expression: map_res.c
+---
+MusicAlbum(
+  id: "MPREb_nlBWQROfvjo",
+  playlist_id: Some("OLAK5uy_myZkBX2d2TzcrlQhIwLy3hCj2MkAMaPR4"),
+  name: "Märchen enden gut",
+  cover: [
+    Thumbnail(
+      url: "https://lh3.googleusercontent.com/Z5CF2JCRD5o7fBywh9Spg_Wvmrqkg0M01FWsSm_mdmUSfplv--9NgIiBRExudt7s0TTd3tgpJ7CLRFal=w60-h60-l90-rj",
+      width: 60,
+      height: 60,
+    ),
+    Thumbnail(
+      url: "https://lh3.googleusercontent.com/Z5CF2JCRD5o7fBywh9Spg_Wvmrqkg0M01FWsSm_mdmUSfplv--9NgIiBRExudt7s0TTd3tgpJ7CLRFal=w120-h120-l90-rj",
+      width: 120,
+      height: 120,
+    ),
+    Thumbnail(
+      url: "https://lh3.googleusercontent.com/Z5CF2JCRD5o7fBywh9Spg_Wvmrqkg0M01FWsSm_mdmUSfplv--9NgIiBRExudt7s0TTd3tgpJ7CLRFal=w226-h226-l90-rj",
+      width: 226,
+      height: 226,
+    ),
+    Thumbnail(
+      url: "https://lh3.googleusercontent.com/Z5CF2JCRD5o7fBywh9Spg_Wvmrqkg0M01FWsSm_mdmUSfplv--9NgIiBRExudt7s0TTd3tgpJ7CLRFal=w544-h544-l90-rj",
+      width: 544,
+      height: 544,
+    ),
+  ],
+  artists: [
+    ArtistId(
+      id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      name: "Oonagh",
+    ),
+  ],
+  artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+  description: None,
+  album_type: album,
+  year: Some(2016),
+  by_va: false,
+  track_count: 18,
+  tracks: [
+    TrackItem(
+      id: "g0iRiJ_ck48",
+      name: "Aulë und Yavanna",
+      duration: Some(216),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(1),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "rREEBXp0y9s",
+      name: "Numenor",
+      duration: Some(224),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(2),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "zvU5Y8Q19hU",
+      name: "Das Mädchen und die Liebe (feat. Santiano)",
+      duration: Some(176),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(3),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "ARKLrzzTQA0",
+      name: "Niënna",
+      duration: Some(215),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(4),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "tstLgN8A_Ng",
+      name: "Der fahle Mond",
+      duration: Some(268),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(5),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "k2DjgQOY3Ts",
+      name: "Weise den Weg",
+      duration: Some(202),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(6),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "azHwhecxEsI",
+      name: "Zeit der Sommernächte",
+      duration: Some(185),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(7),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "_FcsdYIQ2co",
+      name: "Märchen enden gut",
+      duration: Some(226),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(8),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "27bOWEbshyE",
+      name: "Das Mädchen und der Tod",
+      duration: Some(207),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(9),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "riD_3oZwt8w",
+      name: "Wir sehn uns wieder",
+      duration: Some(211),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(10),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "8GNvjF3no9s",
+      name: "Tanz mit mir",
+      duration: Some(179),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(11),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "YHMFzf1uN2U",
+      name: "Nachtigall",
+      duration: Some(218),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(12),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "jvV-z5F3oAo",
+      name: "Gayatri Mantra",
+      duration: Some(277),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(13),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "u8_9cxlrh8k",
+      name: "Sing mir deine Lieder",
+      duration: Some(204),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(14),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "gSvKcvM1Wk0",
+      name: "Laurië lantar",
+      duration: Some(202),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(15),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "wQHgKRJ0pDQ",
+      name: "Wächter vor dem Tor",
+      duration: Some(222),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(16),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "Ckz5i6-hzf0",
+      name: "Stroh zu Gold",
+      duration: Some(177),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(17),
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "y5zuUgyFqrc",
+      name: "Sonnenwendnacht",
+      duration: Some(220),
+      cover: [],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album: Some(AlbumId(
+        id: "MPREb_nlBWQROfvjo",
+        name: "Märchen enden gut",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: Some(18),
+      by_va: false,
+      unavailable: false,
+    ),
+  ],
+  variants: [
+    AlbumItem(
+      id: "MPREb_jk6Msw8izou",
+      name: "Märchen enden gut (Nyáre Ranta (Märchenedition))",
+      cover: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/BKgnW_-hapCHk599AtRfTYZGdXVIo0C4bJp1Bh7qUpGK7fNAXGW8Bhv2x-ukeFM8cuxKbGqqGaTo8fZASA=w226-h226-l90-rj",
+          width: 226,
+          height: 226,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/BKgnW_-hapCHk599AtRfTYZGdXVIo0C4bJp1Bh7qUpGK7fNAXGW8Bhv2x-ukeFM8cuxKbGqqGaTo8fZASA=w544-h544-l90-rj",
+          width: 544,
+          height: 544,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+          name: "Oonagh",
+        ),
+      ],
+      artist_id: Some("UC_vmjW5e1xEHhYjY2a0kK1A"),
+      album_type: album,
+      year: None,
+      by_va: false,
+    ),
+  ],
+)

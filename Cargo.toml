@@ -1,11 +1,16 @@
 [package]
 name = "youtube-music-core"
-version = "0.9.1"
+version = "0.10.0"
 edition = "2021"
-rust-version = "1.91"
+rust-version = "1.93"
 description = "Native Rust YouTube Music protocol library, JSON CLI, and C ABI"
-license = "MIT"
+license = "GPL-3.0-only"
 repository = "https://github.com/meurz/youtube-music-core"
+
+[workspace]
+members = ["vendor/rustypipe"]
+default-members = ["."]
+resolver = "2"
 
 [lib]
 crate-type = ["rlib", "cdylib"]
@@ -15,6 +20,7 @@ name = "ytmusic"
 path = "src/main.rs"
 
 [dependencies]
+rustypipe = { path = "vendor/rustypipe", default-features = false, features = ["rustls-tls-webpki-roots", "userdata"] }
 clap = { version = "4", features = ["derive", "env"] }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "socks"] }
 serde = { version = "1", features = ["derive"] }
@@ -24,7 +30,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"] }
 httpdate = "1"
 sha1 = "0.10"
 sha2 = "0.10"
-rquickjs = { version = "0.11", default-features = false, features = ["std"] }
 thiserror = "2"
 zeroize = "1"
 aes-gcm = "0.10"

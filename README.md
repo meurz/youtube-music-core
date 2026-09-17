@@ -1,14 +1,14 @@
 # YouTube Music Core
 
-Native Rust client for YouTube Music's unofficial Web Innertube API. Includes a reusable blocking library, the `ytmusic` JSON CLI, and a C ABI for native application hosts. Sign in on Google's official website and import the Music browser session; all subsequent API calls and audio resolution run locally without a browser, Node.js, Python, or yt-dlp process.
+Native Rust desktop adapter for [RustyPipe](https://github.com/TeamPiped/rustypipe) and YouTube Music's unofficial Web Innertube API. Includes a reusable blocking library, the `ytmusic` JSON CLI, and a C ABI for native application hosts. Sign in on Google's official website and import the Music browser session; all subsequent API calls and audio resolution run locally without a browser, Node.js, Python, or yt-dlp process.
 
-**Status: experimental 0.9.1.** Search/suggestions, home/explore, accounts, all six library categories, library/playlist writes, lyrics, contextual queues, and playback use `WEB_REMIX`. Web audio signatures and `n` parameters are resolved by a bounded embedded QuickJS engine using a pinned player parser. No TV, Android, or VR fallback is used. Google can change its private protocol or require additional playback attestation. See [validation and limitations](docs/protocol.md).
+**Status: experimental 0.10.0.** Search/suggestions, home/explore, accounts, all six library categories, library/playlist writes, lyrics, contextual queues, and playback use `WEB_REMIX`. Music reads and Web audio signature/`n` transforms reuse a pinned RustyPipe revision, including its Rust OXC parser and bounded embedded QuickJS execution. Host-specific extensions preserve the existing API. No TV, Android, or VR fallback is used. Google can change its private protocol or require additional playback attestation. See [validation and limitations](docs/protocol.md).
 
 ## Install
 
-Download an archive for Linux, macOS, or Windows from [Releases](https://github.com/meurz/youtube-music-core/releases). Each archive contains the CLI, native shared library, C header, documentation, and MIT license. Verify against `SHA256SUMS`, extract, and run `./ytmusic --help` (Windows: `.\ytmusic.exe --help`).
+Download an archive for Linux, macOS, or Windows from [Releases](https://github.com/meurz/youtube-music-core/releases). Each archive contains the CLI, native shared library, C header, documentation, and applicable license notices. New builds integrating RustyPipe are distributed under GPL-3.0; original MIT notices are retained in `LICENSE-MIT`. Verify against `SHA256SUMS`, extract, and run `./ytmusic --help` (Windows: `.\ytmusic.exe --help`).
 
-With Rust 1.91 or newer:
+The current source requires Rust 1.93 or newer (the repository pins its build toolchain). To install the last published release:
 
 ```sh
 cargo install --git https://github.com/meurz/youtube-music-core --tag v0.9.1 --locked
@@ -39,7 +39,7 @@ Use a result's `video_id` for track operations and `browse_id` for albums/artist
 For a playlist, use `ytmusic playlist PLAYLIST_ID`; the `VL` browse prefix is added automatically.
 Each section carries its own continuation token. Fetch another page with
 `ytmusic continue search 'TOKEN'` (or `browse` / `next`, matching the original endpoint).
-These tokens are opaque and expire; pages are fetched on demand.
+These tokens are opaque and expire; pages are fetched on demand. RustyPipe continuation envelopes are bound to the originating session and endpoint; do not reuse them after changing accounts.
 
 All operation output is JSON on stdout:
 
@@ -177,9 +177,9 @@ Use `--config /path/to/config.json` or `YTMUSIC_CONFIG`. All fields are optional
 Additional fields: `cookie_expirations` (name-to-Unix-expiry metadata from an exported session), `proxy` (HTTP/SOCKS URL), `cookie` (raw Cookie header), `visitor_data`, `po_token`, `client_version`, `auth_user` (default 0), `delegated_session_id` (optional brand/channel ID), `playback_client` (`auto` or `web_remix`; both use Web).
 Prefer `auth import` for secure credential storage. Config cookies require a private file outside the repository; never put them in command arguments. Config cookie input is a header string, not a Netscape file. Old nonempty `oauth`/`music_oauth` configuration is rejected with a migration instruction.
 
-The client discovers the current WEB_REMIX version and visitor data from the Music homepage. `client_version` can override catalog bootstrap. Playback discovers the official player script from the Music watch page, downloads it without account headers, and caches it per client. Only official YouTube HTTPS player-script URLs are accepted. The embedded solver has no filesystem, network, process, or host callbacks and enforces time/memory/stack limits. Its pinned source and licenses are in [vendor](vendor/yt-dlp-ejs/README.md); it does not download replacement solver code at runtime.
+The client discovers the current WEB_REMIX version and visitor data from the Music homepage. `client_version` can override catalog bootstrap. RustyPipe discovers and caches the official player script without account headers. Only official YouTube HTTPS player-script URLs are accepted. The embedded solver has no filesystem, network, process, or host callbacks and enforces time/memory/stack limits. Its pinned source, compatibility changes and license are documented in [vendor/rustypipe/UPSTREAM.md](vendor/rustypipe/UPSTREAM.md); it does not download replacement solver code at runtime.
 
-Cookies are sent only to the fixed Music origin; CDN requests have no account credentials. API/static-script redirects are rejected. Media probes allow at most three redirects restricted to HTTPS Google video CDN URLs, trying at most eight formats. API responses are limited to 16 MiB. Eligible reads retry network errors/timeouts and HTTP 429/502/503/504 at most three attempts, honoring server retry delays up to ten seconds. Writes never retry automatically. A total-operation deadline includes bootstrap, player work, retries and probes; the default is 120 seconds (`--timeout-ms` in the CLI), in addition to per-request timeouts. Native operation handles can cancel HTTP I/O, QuickJS execution and lock waits; CLI Ctrl+C requests cancellation. Standard proxy environment variables are supported; signed media URLs may be tied to the requesting IP.
+Cookies are sent only to the fixed Music origin; CDN requests have no account credentials. API/static-script redirects are rejected. Media probes allow at most three redirects restricted to HTTPS Google video CDN URLs, trying at most eight formats. API responses are limited to 16 MiB. RustyPipe reads retry timeouts, HTTP 429 and server errors once; retained extension reads allow at most three attempts for transient failures, honoring server retry delays up to ten seconds. Writes never retry automatically. A total-operation deadline includes bootstrap, player work, retries and probes; the default is 120 seconds (`--timeout-ms` in the CLI), in addition to per-request timeouts. Native operation handles can cancel HTTP I/O, QuickJS execution and lock waits; CLI Ctrl+C requests cancellation. Standard proxy environment variables are supported; signed media URLs may be tied to the requesting IP.
 
 Music responses now update root-scoped Cookie values and expiry metadata. The CLI verifies changed sessions before saving them to its encrypted profile; `auth refresh` explicitly visits the Music homepage, verifies the account, and saves updates. A newer import or logout wins over a late automatic save. Normal command results remain available if background persistence fails, with a sanitized stderr warning; explicit refresh reports failure. This maintains an active session without a browser process, but cannot restore a revoked session: re-import when rejected. Native SABR audio and optional official-browser PO generation are available; audio playback stays in the native host. See [Web delivery](docs/web-delivery.md) for setup and boundaries. If Google requires additional attestation or changes the player layout, the core reports an error instead of switching to another client.
 
@@ -255,4 +255,4 @@ cargo build --release --locked
 
 Tests run offline using reduced public responses and edge-case fixtures. GitHub Actions checks Linux, Windows, and macOS. The release matrix covers Linux x64/ARM64, Windows x64/ARM64 and macOS Intel/Apple Silicon; each archive requires its native release build to pass. Live probes are manual because region, account state, catalog changes, and anti-bot controls are outside the library's control.
 
-This project is unofficial and is not affiliated with Google or YouTube. MIT licensed.
+This project is unofficial and is not affiliated with Google or YouTube. Builds integrating RustyPipe are GPL-3.0; retain `LICENSE`, `LICENSE-MIT` and third-party notices when redistributing. A linked desktop application must use compatible distribution terms. Previous MIT releases retain their original license.

@@ -25,7 +25,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.91.1
+      - uses: dtolnay/rust-toolchain@1.93.1
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked
       - run: cargo build --release --locked
@@ -35,7 +35,7 @@ jobs:
           RELEASE_TARGET: ${{ matrix.target }}
         run: |
           mkdir -p dist/package
-          cp README.md LICENSE THIRD_PARTY_NOTICES.md dist/package/
+          cp README.md LICENSE LICENSE-MIT THIRD_PARTY_NOTICES.md dist/package/
           cp -r include docs examples vendor dist/package/
           if [[ "$RUNNER_OS" == Windows ]]; then
             cp target/release/ytmusic.exe target/release/youtube_music_core.dll dist/package/
@@ -53,8 +53,28 @@ jobs:
           name: ytmusic-${{ matrix.target }}
           path: dist/*.tar.gz
           if-no-files-found: error
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.93.1
+      - name: Package corresponding source and locked dependencies
+        shell: bash
+        run: |
+          mkdir -p dist/source/.cargo
+          git archive HEAD | tar -x -C dist/source
+          cargo vendor --locked --versioned-dirs dist/source/dependencies > dist/source/.cargo/config.toml
+          # Cargo's generated path is relative to this checkout. The source
+          # archive must remain relocatable after extraction.
+          sed -i 's|directory = "dist/source/dependencies"|directory = "dependencies"|' dist/source/.cargo/config.toml
+          tar -czf dist/ytmusic-source.tar.gz -C dist/source .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ytmusic-source
+          path: dist/ytmusic-source.tar.gz
+          if-no-files-found: error
   publish:
-    needs: build
+    needs: [build, source]
     runs-on: ubuntu-24.04
     environment: release
     permissions:

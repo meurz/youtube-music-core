@@ -94,20 +94,20 @@ after authentication rejection. Long-duration login retention is not guaranteed.
 
 ## Web audio resolution
 
-The Music watch page identifies the official player script. Script URLs must use
-HTTPS port 443 on `music.youtube.com` or `www.youtube.com`, under `/s/player/`,
-ending in `/base.js`. Credentials, query strings, fragments, alternate hosts and
-redirects are rejected. The signature timestamp comes from that same script,
-which is cached per `MusicClient` for six hours. Prepared player code is also retained in a
-bounded in-memory cache for reuse across calls; it contains no account credentials
-or track challenges. A fresh process still performs the initial script analysis.
+RustyPipe discovers and caches the official player script without account
+headers. Script URLs must use HTTPS port 443 on `music.youtube.com` or
+`www.youtube.com`, under `/s/player/`, ending in `/base.js`. Credentials, query
+strings, fragments, alternate hosts and redirects are rejected. The signature
+timestamp comes from that same script. Its extracted transforms are cached in
+memory by RustyPipe; a fresh process still performs the initial script analysis.
 
-Audio `signatureCipher` and `n` challenges are resolved together by a pinned
-vendored yt-dlp-ejs AST solver in embedded QuickJS. No yt-dlp, Node, Python,
-standalone JS engine, or browser subprocess is invoked. The runtime exposes no
-network/filesystem/process/host callbacks and applies input, memory, stack and
-execution limits. Player source is untrusted; raw script errors and challenge
-values do not appear in errors. See `vendor/` for versions, hashes and licenses.
+Audio `signatureCipher` and `n` challenges use RustyPipe's Rust OXC parser and
+embedded QuickJS solver. No yt-dlp, Node, Python, standalone JS engine, or browser
+subprocess is invoked by this core. PO generation remains a separate host
+responsibility. The solver exposes no network/filesystem/process/host callbacks
+and applies input, memory, stack and execution limits. Player source is
+untrusted; raw script errors and challenge values do not appear in errors.
+See `vendor/rustypipe/UPSTREAM.md` for the revision and compatibility changes.
 The generated media URL retains the transformed `n` parameter. Direct raw
 parser calls still reject unresolved `n` challenges.
 
@@ -236,7 +236,7 @@ a **new client handle**, never a credential snapshot. Selector fields are
 remote verification must match it exactly. The original client is unchanged.
 
 `prewarm` actually prepares the current player and returns `ready`,
-`signature_timestamp`, `generation`. Player source has a six-hour lifetime.
+`signature_timestamp`, `generation`. RustyPipe owns the public player-script cache; video proof changes do not invalidate it.
 `prefetch` resolves up to three tracks serially and returns audio-stream results.
 The per-client stream cache holds eight entries for at most five minutes and
 requires more than 90 seconds of remaining URL validity; a missing expiry prevents

@@ -1,0 +1,643 @@
+---
+source: src/client/music_artist.rs
+expression: artist
+---
+MusicArtist(
+  id: "UCfwCE5VhPMGxNPFxtVv7lRw",
+  name: "Sulli",
+  header_image: [
+    Thumbnail(
+      url: "https://lh3.googleusercontent.com/En_CJ9QCHYDDgG7jsu0OOB5KoMs7V9tJB3MTCyg8AljIdSP8mEakr9nkjYhaJDyGp58-iM3XnZaDXg=w540-h225-p-l90-rj",
+      width: 540,
+      height: 225,
+    ),
+    Thumbnail(
+      url: "https://lh3.googleusercontent.com/En_CJ9QCHYDDgG7jsu0OOB5KoMs7V9tJB3MTCyg8AljIdSP8mEakr9nkjYhaJDyGp58-iM3XnZaDXg=w816-h340-p-l90-rj",
+      width: 816,
+      height: 340,
+    ),
+    Thumbnail(
+      url: "https://lh3.googleusercontent.com/En_CJ9QCHYDDgG7jsu0OOB5KoMs7V9tJB3MTCyg8AljIdSP8mEakr9nkjYhaJDyGp58-iM3XnZaDXg=w1440-h600-p-l90-rj",
+      width: 1440,
+      height: 600,
+    ),
+    Thumbnail(
+      url: "https://lh3.googleusercontent.com/En_CJ9QCHYDDgG7jsu0OOB5KoMs7V9tJB3MTCyg8AljIdSP8mEakr9nkjYhaJDyGp58-iM3XnZaDXg=w1920-h800-p-l90-rj",
+      width: 1920,
+      height: 800,
+    ),
+    Thumbnail(
+      url: "https://lh3.googleusercontent.com/En_CJ9QCHYDDgG7jsu0OOB5KoMs7V9tJB3MTCyg8AljIdSP8mEakr9nkjYhaJDyGp58-iM3XnZaDXg=w2880-h1200-p-l90-rj",
+      width: 2880,
+      height: 1200,
+    ),
+  ],
+  description: Some("Choi Jin-ri, better known by her stage name Sulli, was a South Korean actress and singer. She first made her debut as a child actress, appearing as a supporting cast member on the SBS historical drama Ballad of Seodong. Following this, she earned a number of guest roles, appearing in the television series Love Needs a Miracle and Drama City, and the film Vacation. She then subsequently appeared in the independent films Punch Lady and BA:BO, the former being her first time cast in a substantial dramatic role.\nAfter signing a record deal with SM Entertainment, Sulli rose to prominence as a member of the girl group f(x) formed in 2009. The group achieved both critical and commercial success, with four Korean number-one singles and international recognition after becoming the first K-pop act to perform at SXSW. Concurrently with her music career, Sulli returned to acting by starring in the SBS romantic comedy series, To the Beautiful You, a Korean adaptation of the shōjo manga Hana-Kimi where her performance was positively received and earned her two SBS Drama Awards and a nomination at the 49th Paeksang Arts Awards.\n\nFrom Wikipedia (https://en.wikipedia.org/wiki/Sulli) under Creative Commons Attribution CC-BY-SA 3.0 (http://creativecommons.org/licenses/by-sa/3.0/legalcode)"),
+  wikipedia_url: Some("https://en.wikipedia.org/wiki/Sulli"),
+  subscriber_count: Some(80800),
+  tracks: [
+    TrackItem(
+      id: "BGcUVJXViqQ",
+      name: "고블린 Goblin",
+      duration: None,
+      cover: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/SCc0SBxnpEBmISPLVLwItpxpGBGwGRrJUa6N3Q6vVNcJVruUZBvtftSwcI0xtElvV4QVaJeQy78ikvO5=w60-h60-l90-rj",
+          width: 60,
+          height: 60,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/SCc0SBxnpEBmISPLVLwItpxpGBGwGRrJUa6N3Q6vVNcJVruUZBvtftSwcI0xtElvV4QVaJeQy78ikvO5=w120-h120-l90-rj",
+          width: 120,
+          height: 120,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UCfwCE5VhPMGxNPFxtVv7lRw"),
+          name: "SULLI",
+        ),
+      ],
+      artist_id: Some("UCfwCE5VhPMGxNPFxtVv7lRw"),
+      album: Some(AlbumId(
+        id: "MPREb_vq8dZfFBEdx",
+        name: "고블린 Goblin",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: None,
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "7_Bav4c7UGM",
+      name: "온더문 On The Moon",
+      duration: None,
+      cover: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/SCc0SBxnpEBmISPLVLwItpxpGBGwGRrJUa6N3Q6vVNcJVruUZBvtftSwcI0xtElvV4QVaJeQy78ikvO5=w60-h60-l90-rj",
+          width: 60,
+          height: 60,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/SCc0SBxnpEBmISPLVLwItpxpGBGwGRrJUa6N3Q6vVNcJVruUZBvtftSwcI0xtElvV4QVaJeQy78ikvO5=w120-h120-l90-rj",
+          width: 120,
+          height: 120,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UCfwCE5VhPMGxNPFxtVv7lRw"),
+          name: "SULLI",
+        ),
+      ],
+      artist_id: Some("UCfwCE5VhPMGxNPFxtVv7lRw"),
+      album: Some(AlbumId(
+        id: "MPREb_vq8dZfFBEdx",
+        name: "고블린 Goblin",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: None,
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "kzUZABVj5UQ",
+      name: "도로시 Dorothy",
+      duration: None,
+      cover: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/SCc0SBxnpEBmISPLVLwItpxpGBGwGRrJUa6N3Q6vVNcJVruUZBvtftSwcI0xtElvV4QVaJeQy78ikvO5=w60-h60-l90-rj",
+          width: 60,
+          height: 60,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/SCc0SBxnpEBmISPLVLwItpxpGBGwGRrJUa6N3Q6vVNcJVruUZBvtftSwcI0xtElvV4QVaJeQy78ikvO5=w120-h120-l90-rj",
+          width: 120,
+          height: 120,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UCfwCE5VhPMGxNPFxtVv7lRw"),
+          name: "SULLI",
+        ),
+      ],
+      artist_id: Some("UCfwCE5VhPMGxNPFxtVv7lRw"),
+      album: Some(AlbumId(
+        id: "MPREb_vq8dZfFBEdx",
+        name: "고블린 Goblin",
+      )),
+      view_count: None,
+      track_type: track,
+      track_nr: None,
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "P5uE7KDkDFE",
+      name: "Goblin",
+      duration: None,
+      cover: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/P5uE7KDkDFE/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3llrYCRxnw4lKD3-Nz8XgsTedWu_A",
+          width: 400,
+          height: 225,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/P5uE7KDkDFE/hq720.jpg?sqp=-oaymwEXCKAGEMIDIAQqCwjVARCqCBh4INgESFo&rs=AMzJL3lJxwuq6WRAww2nnRRATbKgPOmyGA",
+          width: 800,
+          height: 450,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UCfwCE5VhPMGxNPFxtVv7lRw"),
+          name: "Sulli",
+        ),
+      ],
+      artist_id: Some("UCfwCE5VhPMGxNPFxtVv7lRw"),
+      album: None,
+      view_count: Some(20000000),
+      track_type: video,
+      track_nr: None,
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "kxjZwdLWFrc",
+      name: "SULLI 설리\' 온더문 (On The Moon)\' MV",
+      duration: None,
+      cover: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/kxjZwdLWFrc/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3mAf4PAbMqERr0Ee1z56KS0yU82Tw",
+          width: 400,
+          height: 225,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/kxjZwdLWFrc/hq720.jpg?sqp=-oaymwEXCKAGEMIDIAQqCwjVARCqCBh4INgESFo&rs=AMzJL3mBJQ3I3ldM5NigZgE1j6lPOG2kQg",
+          width: 800,
+          height: 450,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UClGBYGUZmpzUaHgeb9gOBww"),
+          name: "𝐩𝐞𝐚𝐜𝐡𝐩𝐮𝐫𝐩𝐥𝐞",
+        ),
+      ],
+      artist_id: Some("UClGBYGUZmpzUaHgeb9gOBww"),
+      album: None,
+      view_count: Some(211000),
+      track_type: video,
+      track_nr: None,
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "-aneeaddeXc",
+      name: "⌗ ₊𓂃 dorothy — sulli 𔘓 sub. español",
+      duration: None,
+      cover: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/-aneeaddeXc/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3mXFvKO0hjv8jQKNLXiBWRKgv7khw",
+          width: 400,
+          height: 225,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/-aneeaddeXc/hq720.jpg?sqp=-oaymwEXCKAGEMIDIAQqCwjVARCqCBh4INgESFo&rs=AMzJL3nYdbkrUXZsFDTmYxebG8XHLodWJw",
+          width: 800,
+          height: 450,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UCfaO3pZL5XOr8BvNZkrKeVA"),
+          name: "ramuditas",
+        ),
+      ],
+      artist_id: Some("UCfaO3pZL5XOr8BvNZkrKeVA"),
+      album: None,
+      view_count: Some(10000),
+      track_type: video,
+      track_nr: None,
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "YWijFdsj_Ew",
+      name: "sulli - goblin (sped up)",
+      duration: None,
+      cover: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/YWijFdsj_Ew/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3khsx7ja4vd8nCPQmqwNDNbQyVARw",
+          width: 400,
+          height: 225,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/YWijFdsj_Ew/hq720.jpg?sqp=-oaymwEXCKAGEMIDIAQqCwjVARCqCBh4INgESFo&rs=AMzJL3m7tYjzrUQ2a08rnUXXwNXJbqnNNg",
+          width: 800,
+          height: 450,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UCgVWicpO5Jn3VfxqgIU6cpA"),
+          name: "Jpn Sch",
+        ),
+      ],
+      artist_id: Some("UCgVWicpO5Jn3VfxqgIU6cpA"),
+      album: None,
+      view_count: Some(15000),
+      track_type: video,
+      track_nr: None,
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "N217ZuMQnfY",
+      name: "음악캠프 - Dorothy - Picnic, 도로시 - 소풍, Music Camp 20040417",
+      duration: None,
+      cover: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/N217ZuMQnfY/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3kBmlxLhMmsi9VLaMVosj6Ie4aAyw",
+          width: 400,
+          height: 225,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/N217ZuMQnfY/hq720.jpg?sqp=-oaymwEXCKAGEMIDIAQqCwjVARCqCBh4INgESFo&rs=AMzJL3mHxVVuDdgr8HxoJjgtvYwaxtVbzA",
+          width: 800,
+          height: 450,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UCe52oeb7Xv_KaJsEzcKXJJg"),
+          name: "MBCkpop",
+        ),
+      ],
+      artist_id: Some("UCe52oeb7Xv_KaJsEzcKXJJg"),
+      album: None,
+      view_count: Some(1200),
+      track_type: video,
+      track_nr: None,
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "STNyxlYFyVY",
+      name: "SULLI - Goblin (Clean Instrumental)",
+      duration: None,
+      cover: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/STNyxlYFyVY/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3kIUZIKhsmVBW3hc_y-mSGHm3sVUw",
+          width: 400,
+          height: 225,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/STNyxlYFyVY/sddefault.jpg?sqp=-oaymwEWCKoDEPABIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3mT5UrngK0tXHPf61FqSGMKjWZ7YA",
+          width: 426,
+          height: 240,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UCFFvwAcyQhpeQfuAgBN1XZw"),
+          name: "Alan Buenrostro",
+        ),
+      ],
+      artist_id: Some("UCFFvwAcyQhpeQfuAgBN1XZw"),
+      album: None,
+      view_count: Some(12000),
+      track_type: video,
+      track_nr: None,
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "v5KZ5dalhzU",
+      name: "intp kpop songs (kpop mbti series pt.9)",
+      duration: None,
+      cover: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/v5KZ5dalhzU/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3nMdCDQ1v-pG312TsgWId2TsMo1zw",
+          width: 400,
+          height: 225,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/v5KZ5dalhzU/hq720.jpg?sqp=-oaymwEXCKAGEMIDIAQqCwjVARCqCBh4INgESFo&rs=AMzJL3mS7zCcBbRf8t29XGtChWkxd3owMg",
+          width: 800,
+          height: 450,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UC_xEL8cbkItBH00KrGz9fbQ"),
+          name: "orbitiny사샤",
+        ),
+      ],
+      artist_id: Some("UC_xEL8cbkItBH00KrGz9fbQ"),
+      album: None,
+      view_count: Some(7400),
+      track_type: video,
+      track_nr: None,
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "vaSSdzgDNw0",
+      name: "Goblin~ Sulli English Cover",
+      duration: None,
+      cover: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/vaSSdzgDNw0/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3lbkZLY174thtujXlmmPqngKOtxvQ",
+          width: 400,
+          height: 225,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/vaSSdzgDNw0/hq720.jpg?sqp=-oaymwEXCKAGEMIDIAQqCwjVARCqCBh4INgESFo&rs=AMzJL3k5nsO0ap7vTsm8JoihXd9opC9QwA",
+          width: 800,
+          height: 450,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UCaFqztcJss3HrXNurzQJyqQ"),
+          name: "Bee",
+        ),
+      ],
+      artist_id: Some("UCaFqztcJss3HrXNurzQJyqQ"),
+      album: None,
+      view_count: Some(1400),
+      track_type: video,
+      track_nr: None,
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "Rq_JkcROjsI",
+      name: "𝗀𝗈𝖻𝗅𝗂𝗇 // 𝗌𝗎𝗅𝗅𝗂 ༄ 𝗌𝗅𝗈𝗐𝖾𝖽 + 𝗋𝖾𝗏𝖾𝗋𝖻",
+      duration: None,
+      cover: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/Rq_JkcROjsI/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3ntvxfQE8ErdwpxdksKA_Gtcza3Rw",
+          width: 400,
+          height: 225,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/Rq_JkcROjsI/sddefault.jpg?sqp=-oaymwEWCKoDEPABIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3kyJ7LFsJWz4Ac44uL8GPxsRldOng",
+          width: 426,
+          height: 240,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UCMPqKiPdiSoi8eCW5Dou1IQ"),
+          name: "ᴜᴋɪʏᴏ",
+        ),
+      ],
+      artist_id: Some("UCMPqKiPdiSoi8eCW5Dou1IQ"),
+      album: None,
+      view_count: Some(25000),
+      track_type: video,
+      track_nr: None,
+      by_va: false,
+      unavailable: false,
+    ),
+    TrackItem(
+      id: "5VNZWTzJFso",
+      name: "Dorothy - Picnic, 도로시 - 소풍, Music Camp 20040529",
+      duration: None,
+      cover: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/5VNZWTzJFso/sddefault.jpg?sqp=-oaymwEWCJADEOEBIAQqCghqEJQEGHgg6AJIWg&rs=AMzJL3niVh6jZ_8X2utHrUst0PgILeoY4g",
+          width: 400,
+          height: 225,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/5VNZWTzJFso/hq720.jpg?sqp=-oaymwEXCKAGEMIDIAQqCwjVARCqCBh4INgESFo&rs=AMzJL3nKv3B3uev0Pg01kUNF_F4GHO39qg",
+          width: 800,
+          height: 450,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UCe52oeb7Xv_KaJsEzcKXJJg"),
+          name: "MBCkpop",
+        ),
+      ],
+      artist_id: Some("UCe52oeb7Xv_KaJsEzcKXJJg"),
+      album: None,
+      view_count: Some(3700),
+      track_type: video,
+      track_nr: None,
+      by_va: false,
+      unavailable: false,
+    ),
+  ],
+  albums: [
+    AlbumItem(
+      id: "MPREb_vq8dZfFBEdx",
+      name: "고블린 Goblin",
+      cover: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/SCc0SBxnpEBmISPLVLwItpxpGBGwGRrJUa6N3Q6vVNcJVruUZBvtftSwcI0xtElvV4QVaJeQy78ikvO5=w226-h226-l90-rj",
+          width: 226,
+          height: 226,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/SCc0SBxnpEBmISPLVLwItpxpGBGwGRrJUa6N3Q6vVNcJVruUZBvtftSwcI0xtElvV4QVaJeQy78ikvO5=w544-h544-l90-rj",
+          width: 544,
+          height: 544,
+        ),
+      ],
+      artists: [
+        ArtistId(
+          id: Some("UCfwCE5VhPMGxNPFxtVv7lRw"),
+          name: "Sulli",
+        ),
+      ],
+      artist_id: Some("UCfwCE5VhPMGxNPFxtVv7lRw"),
+      album_type: single,
+      year: Some(2019),
+      by_va: false,
+    ),
+  ],
+  playlists: [],
+  similar_artists: [
+    ArtistItem(
+      id: "UCpUChkP-KE20GRsyfjU83_g",
+      name: "CHUNG HA",
+      avatar: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/gfAf1lvXJt_ExLMV0FqnWrTGyAiFpRZW7zeb1ooahA542nBqjLTzcxdhFQtvVWvR0_jzcKOccjIyiFnP=w226-h226-l90-rj",
+          width: 226,
+          height: 226,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/gfAf1lvXJt_ExLMV0FqnWrTGyAiFpRZW7zeb1ooahA542nBqjLTzcxdhFQtvVWvR0_jzcKOccjIyiFnP=w544-h544-l90-rj",
+          width: 544,
+          height: 544,
+        ),
+      ],
+      subscriber_count: Some(1470000),
+    ),
+    ArtistItem(
+      id: "UCmeskqhmPRuteGVH4yCXT0A",
+      name: "SUNMI",
+      avatar: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/iTlnsDGGAJl_JUPgHmIbdDXC1woK_Rc9kS21KWf41o-SQAqB0MNbZTx9LTyixslcrszUt7Ju7HGKd6c=w226-h226-p-l90-rj",
+          width: 226,
+          height: 226,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/iTlnsDGGAJl_JUPgHmIbdDXC1woK_Rc9kS21KWf41o-SQAqB0MNbZTx9LTyixslcrszUt7Ju7HGKd6c=w544-h544-p-l90-rj",
+          width: 544,
+          height: 544,
+        ),
+      ],
+      subscriber_count: Some(1490000),
+    ),
+    ArtistItem(
+      id: "UCVXeNwNQs07XQ8d1HtvuxVg",
+      name: "JEON SOYEON",
+      avatar: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/wab1UdA-UM1humYF-FlF6tWxacpva7tN8IO67XhZaRZmBPcrQN4SASj0gcrycDc3_FwtwXJ-gTZ-PoPO=w226-h226-l90-rj",
+          width: 226,
+          height: 226,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/wab1UdA-UM1humYF-FlF6tWxacpva7tN8IO67XhZaRZmBPcrQN4SASj0gcrycDc3_FwtwXJ-gTZ-PoPO=w544-h544-l90-rj",
+          width: 544,
+          height: 544,
+        ),
+      ],
+      subscriber_count: Some(31400),
+    ),
+    ArtistItem(
+      id: "UCvAUJvMNPy1LLVKpFiu-X9w",
+      name: "SEULGI",
+      avatar: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/NT9GLSF-1zyAb76sixVb9SfMuGef0Dh5aiKODfWt_wWvtGYBnAPs_DcRtOErLw36zYZb4xbsQEzM8ek=w226-h226-l90-rj",
+          width: 226,
+          height: 226,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/NT9GLSF-1zyAb76sixVb9SfMuGef0Dh5aiKODfWt_wWvtGYBnAPs_DcRtOErLw36zYZb4xbsQEzM8ek=w544-h544-l90-rj",
+          width: 544,
+          height: 544,
+        ),
+      ],
+      subscriber_count: Some(41100),
+    ),
+    ArtistItem(
+      id: "UC277cpXD9BLeaGgh3yDP40w",
+      name: "블랙스완 BLACKSWAN",
+      avatar: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/a-/ACB-R5RmPcZVcm8zNXAbprhgqATOJMU6RNbj3OuQyERLHA=w226-h226-l90-rj",
+          width: 226,
+          height: 226,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/a-/ACB-R5RmPcZVcm8zNXAbprhgqATOJMU6RNbj3OuQyERLHA=w544-h544-l90-rj",
+          width: 544,
+          height: 544,
+        ),
+      ],
+      subscriber_count: Some(603000),
+    ),
+    ArtistItem(
+      id: "UCrt7YUoF7m7PvV_Dt9xWqJQ",
+      name: "LUNA",
+      avatar: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/MISR863mLnf03T-2YBEvxYFQPIvPYJ_clea7H5gZhdsN30i8ufw_2NnvOvVxQTOK7-lx_sRW8Q7A5uM=w226-h226-l90-rj",
+          width: 226,
+          height: 226,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/MISR863mLnf03T-2YBEvxYFQPIvPYJ_clea7H5gZhdsN30i8ufw_2NnvOvVxQTOK7-lx_sRW8Q7A5uM=w544-h544-l90-rj",
+          width: 544,
+          height: 544,
+        ),
+      ],
+      subscriber_count: Some(4510),
+    ),
+    ArtistItem(
+      id: "UCBj8m2FEsjfovt0Fxq0HEJg",
+      name: "Ladies\' Code",
+      avatar: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/JC2ZAjp-IUVIStNvPpxgaJknX_WkUZmV1XqLQvJSr-_Kg9_bVfUJi_3DYztbI1ObFA6LejJimJfKdfjp=w226-h226-l90-rj",
+          width: 226,
+          height: 226,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/JC2ZAjp-IUVIStNvPpxgaJknX_WkUZmV1XqLQvJSr-_Kg9_bVfUJi_3DYztbI1ObFA6LejJimJfKdfjp=w544-h544-l90-rj",
+          width: 544,
+          height: 544,
+        ),
+      ],
+      subscriber_count: Some(11400),
+    ),
+    ArtistItem(
+      id: "UCdhWlMXp2dQBaG5rZS_aSkQ",
+      name: "DAWN",
+      avatar: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/a-/ACB-R5QVBnhjI6XKoLtxuTf6LuijMMtJb7e5S2IlOeqo2Q=w226-h226-l90-rj",
+          width: 226,
+          height: 226,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/a-/ACB-R5QVBnhjI6XKoLtxuTf6LuijMMtJb7e5S2IlOeqo2Q=w544-h544-l90-rj",
+          width: 544,
+          height: 544,
+        ),
+      ],
+      subscriber_count: Some(802000),
+    ),
+    ArtistItem(
+      id: "UCWT2ZfW7d8YI-HinHEVhyCA",
+      name: "(G)I-DLE",
+      avatar: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/uZQSZdDnDJCajJtE6Ig9tqgdO7-uogJpdk9TM0p7iEBmnAQXaSGqYET-W-SHTY-NL9UQ2sdOVtIhd54=w226-h226-p-l90-rj",
+          width: 226,
+          height: 226,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/uZQSZdDnDJCajJtE6Ig9tqgdO7-uogJpdk9TM0p7iEBmnAQXaSGqYET-W-SHTY-NL9UQ2sdOVtIhd54=w544-h544-p-l90-rj",
+          width: 544,
+          height: 544,
+        ),
+      ],
+      subscriber_count: Some(5310000),
+    ),
+    ArtistItem(
+      id: "UCOCo09j3eIVdj3HkbJ9c40Q",
+      name: "HYO",
+      avatar: [
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/olRNTvkhjENW-kLcKRg9LQDmWwS3V0KHhTtw4Y8ETFpFLNxlI371_EDh22CtTw0UKgm7YpbGJUUf6nEt=w226-h226-p-l90-rj",
+          width: 226,
+          height: 226,
+        ),
+        Thumbnail(
+          url: "https://lh3.googleusercontent.com/olRNTvkhjENW-kLcKRg9LQDmWwS3V0KHhTtw4Y8ETFpFLNxlI371_EDh22CtTw0UKgm7YpbGJUUf6nEt=w544-h544-p-l90-rj",
+          width: 544,
+          height: 544,
+        ),
+      ],
+      subscriber_count: Some(141000),
+    ),
+  ],
+  tracks_playlist_id: None,
+  videos_playlist_id: Some("OLAK5uy_lmH3iVq6lqjsnLkBWzpvRTh0DidLzbU-I"),
+  radio_id: Some("RDEMYsk_DTFHAng1G7n5toi_oA"),
+)

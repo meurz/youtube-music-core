@@ -1,35 +1,27 @@
 use crate::transport::Response;
 use crate::{
-    client::{checked_response, config_string, validate_video_id},
+    client::validate_video_id,
     model::{AudioFormat, AudioStream, Player, StreamVerification},
     parse, Error, MusicClient, Result,
 };
 use reqwest::Url;
 use serde::Serialize;
-use serde_json::{json, Value};
+#[cfg(test)]
+use serde_json::json;
+use serde_json::Value;
 use std::{
     collections::{BTreeSet, VecDeque},
     io::Read,
-    sync::Arc,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 const WEB_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const PROBE_BYTES: u64 = 4096;
 
-const SCRIPT_TTL: Duration = Duration::from_secs(6 * 60 * 60);
 const STREAM_TTL: Duration = Duration::from_secs(5 * 60);
 const EXPIRY_MARGIN_SECONDS: u64 = 90;
 const MAX_STREAM_CACHE: usize = 8;
 const MAX_PREFETCH: usize = 3;
-
-#[derive(Clone)]
-struct WebPlayerScript {
-    source: Arc<String>,
-    timestamp: u32,
-    loaded_at: Instant,
-    generation: u64,
-}
 
 struct CachedStream {
     video_id: String,
@@ -42,14 +34,12 @@ struct CachedStream {
 #[derive(Default)]
 pub(crate) struct PlaybackCache {
     generation: u64,
-    script: Option<Arc<WebPlayerScript>>,
     streams: VecDeque<CachedStream>,
 }
 
 impl PlaybackCache {
     fn invalidate(&mut self) {
         self.generation = self.generation.wrapping_add(1);
-        self.script = None;
         self.streams.clear();
     }
 
@@ -60,11 +50,7 @@ impl PlaybackCache {
         self.generation = self.generation.wrapping_add(1);
         self.streams
             .retain(|entry| !changed.contains(&entry.video_id));
-        // Old in-flight resolvers retain their old generation and cannot repopulate
-        // the cache. Public player code is independent of video/account proof.
-        if let Some(script) = &mut self.script {
-            Arc::make_mut(script).generation = self.generation;
-        }
+        // The upstream public script cache is independent of video proofs.
     }
 
     fn stream(
@@ -143,110 +129,6 @@ fn must_propagate(error: &Error) -> bool {
     )
 }
 
-fn player_script_url(html: &str) -> Result<Url> {
-    let path = config_string(html, "jsUrl")
-        .or_else(|| config_string(html, "PLAYER_JS_URL"))
-        .ok_or_else(|| Error::Protocol("Music page has no Web player script".into()))?;
-    let base = Url::parse("https://music.youtube.com/").expect("constant URL");
-    let url = base
-        .join(&path)
-        .map_err(|_| Error::Protocol("invalid Web player script URL".into()))?;
-    if url.scheme() != "https"
-        || !matches!(
-            url.host_str(),
-            Some("music.youtube.com" | "www.youtube.com")
-        )
-        || url.port_or_known_default() != Some(443)
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || !url.path().starts_with("/s/player/")
-        || !url.path().ends_with("/base.js")
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err(Error::Protocol(
-            "Web player script must use the official YouTube player path".into(),
-        ));
-    }
-    Ok(url)
-}
-
-struct PendingAudio {
-    index: usize,
-    url: Url,
-    signature: Option<(String, String)>,
-    n: Option<String>,
-}
-
-fn only_query_value(url: &Url, name: &str) -> Result<Option<String>> {
-    let mut matches = url.query_pairs().filter(|(key, _)| key == name);
-    let value = matches.next().map(|(_, v)| v.into_owned());
-    if matches.next().is_some() {
-        return Err(Error::Protocol(
-            "duplicate Web player challenge parameter".into(),
-        ));
-    }
-    Ok(value)
-}
-
-fn collect_audio(raw: &Value) -> Result<Vec<PendingAudio>> {
-    let mut pending = Vec::new();
-    for (index, format) in raw["streamingData"]["adaptiveFormats"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .enumerate()
-    {
-        if crate::parse::is_encrypted_format(format) {
-            continue;
-        }
-        if !format["mimeType"]
-            .as_str()
-            .is_some_and(|m| m.starts_with("audio/"))
-        {
-            continue;
-        }
-        if pending.len() >= 64 {
-            return Err(Error::Protocol("too many Web audio formats".into()));
-        }
-        let (url, signature) = if let Some(url) = format["url"].as_str() {
-            (media_url(url)?, None)
-        } else if let Some(cipher) = format["signatureCipher"]
-            .as_str()
-            .or_else(|| format["cipher"].as_str())
-        {
-            if cipher.len() > 65536 {
-                return Err(Error::Protocol("Web cipher exceeds size limit".into()));
-            }
-            let mut query = Url::parse("https://music.youtube.com/").expect("constant URL");
-            query.set_query(Some(cipher));
-            let url = only_query_value(&query, "url")?
-                .ok_or_else(|| Error::Protocol("Web cipher has no media URL".into()))?;
-            let signature = only_query_value(&query, "s")?
-                .ok_or_else(|| Error::Protocol("Web cipher has no signature".into()))?;
-            let sp = only_query_value(&query, "sp")?.unwrap_or_else(|| "signature".into());
-            if sp.is_empty()
-                || sp.len() > 64
-                || !sp.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-                || sp == "n"
-            {
-                return Err(Error::Protocol("invalid Web signature parameter".into()));
-            }
-            (media_url(&url)?, Some((sp, signature)))
-        } else {
-            continue;
-        };
-        let n = only_query_value(&url, "n")?;
-        pending.push(PendingAudio {
-            index,
-            url,
-            signature,
-            n,
-        });
-    }
-    Ok(pending)
-}
-
 fn replace_query(url: &mut Url, key: &str, value: &str) {
     let pairs: Vec<(String, String)> = url
         .query_pairs()
@@ -259,94 +141,32 @@ fn replace_query(url: &mut Url, key: &str, value: &str) {
         .append_pair(key, value);
 }
 
-fn resolve_web_urls(raw: &mut Value, script: &str) -> Result<()> {
-    let pending = collect_audio(raw)?;
-    let signatures: Vec<String> = pending
-        .iter()
-        .filter_map(|p| p.signature.as_ref().map(|(_, s)| s.clone()))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    let mut sabr_url = raw["streamingData"]["serverAbrStreamingUrl"]
-        .as_str()
-        .map(media_url)
-        .transpose()?;
-    let sabr_n = sabr_url
-        .as_ref()
-        .map(|url| only_query_value(url, "n"))
-        .transpose()?
-        .flatten();
-    let n_values: Vec<String> = pending
-        .iter()
-        .filter_map(|p| p.n.clone())
-        .chain(sabr_n.clone())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    if signatures.is_empty() && n_values.is_empty() {
-        return Ok(());
-    }
-    let solved = crate::decipher::solve(script, &signatures, &n_values)?;
-    if let (Some(url), Some(n)) = (&mut sabr_url, sabr_n) {
-        let decoded = solved
-            .n_values
-            .get(&n)
-            .ok_or_else(|| Error::Protocol("Web SABR challenge resolution failed".into()))?;
-        replace_query(url, "n", decoded);
-        raw["streamingData"]["serverAbrStreamingUrl"] = url.as_str().into();
-    }
-    for mut audio in pending {
-        if let Some((sp, signature)) = audio.signature {
-            let decoded = solved
-                .signatures
-                .get(&signature)
-                .ok_or_else(|| Error::Protocol("Web signature resolution failed".into()))?;
-            replace_query(&mut audio.url, &sp, decoded);
-        }
-        if let Some(n) = audio.n {
-            let decoded = solved
-                .n_values
-                .get(&n)
-                .ok_or_else(|| Error::Protocol("Web n resolution failed".into()))?;
-            replace_query(&mut audio.url, "n", decoded);
-        }
-        raw["streamingData"]["adaptiveFormats"][audio.index]["url"] = audio.url.as_str().into();
-    }
-    Ok(())
-}
-
-fn parse_web_player(mut raw: Value, script: &str, video_id: &str) -> Result<Player> {
-    // Preserve the original parser result before any URL mutation. It never
-    // exposes raw n challenges as ready streams, including on solver failure.
-    let mut metadata = parse::player(&raw)?;
-    if metadata
+fn parse_web_player(raw: Value, video_id: &str) -> Result<Player> {
+    crate::operation::check()?;
+    let failed = raw.get("_rustypipeResolutionError").is_some();
+    let mut player = if failed {
+        parse::player(&raw)?
+    } else {
+        parse::resolved_web_player(&raw)?
+    };
+    if player
         .track
         .as_ref()
-        .is_some_and(|t| t.video_id != video_id)
-        || (raw["streamingData"].is_object() && metadata.track.is_none())
+        .is_some_and(|track| track.video_id != video_id)
+        || (raw["streamingData"].is_object() && player.track.is_none())
     {
         return Err(Error::Protocol(
             "player track does not match the requested video".into(),
         ));
     }
-    let mut player = match resolve_web_urls(&mut raw, script) {
-        Ok(()) => parse::resolved_web_player(&raw)?,
-        Err(error) => {
-            if must_propagate(&error) {
-                return Err(error);
-            }
-            metadata.resolution_error = Some(match error {
-                Error::StreamUnavailable(message) => message,
-                other => other.to_string(),
-            });
-            let before = metadata.audio_streams.len();
-            metadata
-                .audio_streams
-                .retain(|audio| media_url(&audio.url).is_ok());
-            metadata.unresolved_audio_formats += before - metadata.audio_streams.len();
-            metadata
-        }
-    };
+    if failed {
+        player.resolution_error = Some("Web player challenge resolution failed".into());
+    }
+    let before = player.audio_streams.len();
+    player
+        .audio_streams
+        .retain(|audio| media_url(&audio.url).is_ok());
+    player.unresolved_audio_formats += before - player.audio_streams.len();
     player.source_client = Some("WEB_REMIX".into());
     for audio in &mut player.audio_streams {
         audio.source_client = player.source_client.clone();
@@ -362,46 +182,6 @@ impl MusicClient {
         crate::operation::lock(&self.playback)
     }
 
-    fn web_player_script(&self, video_id: Option<&str>) -> Result<Arc<WebPlayerScript>> {
-        crate::operation::check()?;
-        let generation = {
-            let mut cache = self.playback_cache()?;
-            if let Some(script) = &cache.script {
-                if script.loaded_at.elapsed() < SCRIPT_TTL {
-                    return Ok(Arc::clone(script));
-                }
-                cache.invalidate();
-            }
-            cache.generation
-        };
-        crate::operation::phase("loading_player");
-        let path = video_id
-            .map(|id| format!("/watch?v={id}"))
-            .unwrap_or_else(|| "/".into());
-        let html = self.music_page(&path)?;
-        let url = player_script_url(&html)?;
-        // Static player code needs no account headers. Reject all redirects.
-        let source =
-            checked_response(self.send(self.http.get(url), 16 * 1024 * 1024, false, true)?)?;
-        let timestamp = crate::decipher::signature_timestamp(&source)
-            .ok_or_else(|| Error::Protocol("Web player has no signature timestamp".into()))?;
-        let script = Arc::new(WebPlayerScript {
-            source: Arc::new(source),
-            timestamp,
-            loaded_at: Instant::now(),
-            generation,
-        });
-        let mut cache = self.playback_cache()?;
-        // Explicit invalidation wins over an older bootstrap completing later.
-        if cache.generation == generation {
-            if let Some(current) = &cache.script {
-                return Ok(Arc::clone(current));
-            }
-            cache.script = Some(Arc::clone(&script));
-        }
-        Ok(script)
-    }
-
     /// Fetch and actually prepare the current official player ahead of playback.
     /// Schedule this off the UI thread. No media URL or credentials are returned.
     pub fn prewarm(&self) -> Result<PlaybackWarmup> {
@@ -409,23 +189,31 @@ impl MusicClient {
     }
 
     fn prewarm_inner(&self) -> Result<PlaybackWarmup> {
-        let script = self.web_player_script(None)?;
-        crate::decipher::prepare(&script.source)?;
+        let generation = self.playback_cache()?.generation;
+        let signature_timestamp = self.upstream_prewarm_player()?;
         crate::operation::check()?;
         Ok(PlaybackWarmup {
             ready: true,
-            signature_timestamp: script.timestamp,
-            generation: script.generation,
+            signature_timestamp,
+            generation,
         })
     }
 
     /// Forget script and media caches. In-flight older results cannot repopulate them.
     pub fn invalidate_playback(&self) -> Result<()> {
+        // Clear transforms before advancing the media generation. A request
+        // crossing this boundary retains the older generation and cannot fill
+        // the new media cache. Never hold playback while query() takes session.
+        self.upstream_invalidate_player()?;
         self.playback_cache()?.invalidate();
         Ok(())
     }
 
     fn invalidate_generation(&self, generation: u64) -> Result<()> {
+        if self.playback_cache()?.generation != generation {
+            return Ok(());
+        }
+        self.upstream_invalidate_player()?;
         let mut cache = self.playback_cache()?;
         if cache.generation == generation {
             cache.invalidate();
@@ -450,23 +238,9 @@ impl MusicClient {
         reload_token: Option<&str>,
     ) -> Result<(Player, u64)> {
         crate::operation::check()?;
-        let script = self.web_player_script(Some(video_id))?;
-        let mut body = json!({"videoId":video_id,"contentCheckOk":true,"racyCheckOk":true,
-            "playbackContext":{"contentPlaybackContext":{"signatureTimestamp":script.timestamp,"html5Preference":"HTML5_PREF_WANTS"}}});
-        if let Some(token) = self
-            .po_token_for(video_id, crate::attestation::PoTokenContext::Player)?
-            .or_else(|| self.config.po_token.clone())
-        {
-            body["serviceIntegrityDimensions"] = json!({"poToken":token});
-        }
-        if let Some(token) = reload_token {
-            body["playbackContext"]["reloadPlaybackContext"] =
-                json!({"reloadPlaybackParams":{"token":token}});
-        }
-        crate::operation::phase("requesting_stream");
-        let raw = self.post("player", body)?;
-        crate::operation::phase("resolving_stream");
-        let mut player = parse_web_player(raw, &script.source, video_id)?;
+        let generation = self.playback_cache()?.generation;
+        let raw = self.upstream_player_raw(video_id, reload_token)?;
+        let mut player = parse_web_player(raw, video_id)?;
         if let Some((token, token_expiry)) =
             self.po_token_with_expiry(video_id, crate::attestation::PoTokenContext::Gvs)?
         {
@@ -477,7 +251,7 @@ impl MusicClient {
                 audio.expires_at = audio.expires_at.map(|expiry| expiry.min(token_expiry));
             }
         }
-        Ok((player, script.generation))
+        Ok((player, generation))
     }
 
     /// Inspect the Web player and resolve signature/n challenges without CDN probing.
@@ -528,14 +302,6 @@ impl MusicClient {
         crate::operation::check()?;
         {
             let mut cache = self.playback_cache()?;
-            // A stale script also invalidates all URLs derived from it.
-            if cache
-                .script
-                .as_ref()
-                .is_some_and(|script| script.loaded_at.elapsed() >= SCRIPT_TTL)
-            {
-                cache.invalidate();
-            }
             if force_refresh {
                 cache.streams.retain(|entry| entry.video_id != video_id);
             } else if let Some(audio) = cache.stream(video_id, format, Instant::now(), unix_now()?)
@@ -835,6 +601,7 @@ mod tests {
 
     fn unsupported_player_response() -> Value {
         json!({"playabilityStatus":{"status":"OK"},
+        "_rustypipeResolutionError":"fixture",
         "videoDetails":{"videoId":"4D7u5KF7SP8","title":"Metadata survives"},
         "streamingData":{"adaptiveFormats":[
             {"itag":140,"mimeType":"audio/mp4","url":"https://rr1.googlevideo.com/videoplayback?expire=4102444800"},
@@ -844,12 +611,7 @@ mod tests {
 
     #[test]
     fn unresolved_web_challenge_preserves_metadata_and_safe_direct_formats() {
-        let player = parse_web_player(
-            unsupported_player_response(),
-            "unsupported player",
-            "4D7u5KF7SP8",
-        )
-        .unwrap();
+        let player = parse_web_player(unsupported_player_response(), "4D7u5KF7SP8").unwrap();
         assert_eq!(player.track.as_ref().unwrap().title, "Metadata survives");
         assert_eq!(player.audio_streams.len(), 1);
         assert_eq!(player.audio_streams[0].itag, 140);
@@ -875,7 +637,7 @@ mod tests {
             .as_array_mut()
             .unwrap()
             .remove(0);
-        let player = parse_web_player(response, "unsupported player", "4D7u5KF7SP8").unwrap();
+        let player = parse_web_player(response, "4D7u5KF7SP8").unwrap();
         assert!(player.track.is_some());
         assert!(player.audio_streams.is_empty());
         assert_eq!(player.unresolved_audio_formats, 1);
@@ -892,42 +654,10 @@ mod tests {
         let mut response = unsupported_player_response();
         response["streamingData"]["adaptiveFormats"][0]["url"] =
             "https://evil.test/videoplayback".into();
-        let player = parse_web_player(response, "unsupported player", "4D7u5KF7SP8").unwrap();
+        let player = parse_web_player(response, "4D7u5KF7SP8").unwrap();
         assert!(player.audio_streams.is_empty());
         assert_eq!(player.unresolved_audio_formats, 2);
         assert!(player.track.is_some());
-    }
-
-    #[test]
-    fn only_official_player_scripts_are_accepted() {
-        let good = r#"{"jsUrl":"/s/player/test/player_es6.vflset/en_US/base.js"}"#;
-        assert_eq!(
-            player_script_url(good).unwrap().host_str(),
-            Some("music.youtube.com")
-        );
-        for path in [
-            "https://evil.test/s/player/x/base.js",
-            "//evil.test/s/player/x/base.js",
-            "https://music.youtube.com:444/s/player/x/base.js",
-            "/s/player/x/base.js?secret=1",
-            "/s/player/../../evil/base.js",
-        ] {
-            assert!(player_script_url(&json!({"jsUrl":path}).to_string()).is_err());
-        }
-    }
-
-    #[test]
-    fn malformed_cipher_cannot_redirect_credentials_or_hide_duplicates() {
-        for cipher in [
-            "url=https%3A%2F%2Fevil.test%2Fvideoplayback&s=private",
-            "url=a&url=b&s=private",
-            "url=https%3A%2F%2Frr1.googlevideo.com%2Fvideoplayback&s=a&s=b",
-            "url=https%3A%2F%2Frr1.googlevideo.com%2Fvideoplayback&s=a&sp=n",
-        ] {
-            let raw = json!({"streamingData":{"adaptiveFormats":[{"mimeType":"audio/mp4","signatureCipher":cipher}]}});
-            let error = collect_audio(&raw).err().unwrap().to_string();
-            assert!(!error.contains("private"));
-        }
     }
 
     #[test]
@@ -1103,15 +833,8 @@ mod tests {
         let first = bundle("QoXDQa9L12A");
         let second = bundle("dQw4w9WgXcQ");
         client.set_po_tokens(vec![first.clone()]).unwrap();
-        let old_script = {
+        let old_generation = {
             let mut cache = client.playback_cache().unwrap();
-            let script = Arc::new(WebPlayerScript {
-                source: Arc::new("public player fixture".into()),
-                timestamp: 42,
-                loaded_at: Instant::now(),
-                generation: cache.generation,
-            });
-            cache.script = Some(Arc::clone(&script));
             cache.insert(
                 &first.video_id,
                 AudioFormat::Any,
@@ -1122,31 +845,23 @@ mod tests {
                 AudioFormat::Any,
                 player().audio_streams.remove(0),
             );
-            script
+            cache.generation
         };
         client
             .set_po_tokens(vec![first.clone(), second.clone()])
             .unwrap();
-        let new_script = {
+        let new_generation = {
             let cache = client.playback_cache().unwrap();
-            let script = cache.script.as_ref().unwrap();
-            assert!(Arc::ptr_eq(&old_script.source, &script.source));
-            assert_eq!(old_script.loaded_at, script.loaded_at);
-            assert_ne!(old_script.generation, cache.generation);
-            assert_eq!(script.generation, cache.generation);
             assert_eq!(cache.streams.len(), 1);
             assert_eq!(cache.streams[0].video_id, first.video_id);
-            Arc::clone(script)
+            assert_ne!(cache.generation, old_generation);
+            cache.generation
         };
-        // Reordering identical bundles is a no-op; old failures must not flush new work.
         client
             .set_po_tokens(vec![second.clone(), first.clone()])
             .unwrap();
-        client.invalidate_generation(old_script.generation).unwrap();
-        assert!(Arc::ptr_eq(
-            client.playback_cache().unwrap().script.as_ref().unwrap(),
-            &new_script
-        ));
+        client.invalidate_generation(old_generation).unwrap();
+        assert_eq!(client.playback_cache().unwrap().generation, new_generation);
         let mut renewed = first.clone();
         renewed.expires_at += 60;
         client.set_po_tokens(vec![renewed, second]).unwrap();
@@ -1162,27 +877,14 @@ mod tests {
         client.set_po_tokens(vec![]).unwrap();
         let cache = client.playback_cache().unwrap();
         assert!(cache.streams.is_empty());
-        assert!(Arc::ptr_eq(
-            &cache.script.as_ref().unwrap().source,
-            &old_script.source
-        ));
     }
 
     #[test]
     fn invalidation_removes_signed_urls_and_advances_generation() {
-        let mut cache = PlaybackCache {
-            script: Some(Arc::new(WebPlayerScript {
-                source: Arc::new(String::new()),
-                timestamp: 1,
-                loaded_at: Instant::now(),
-                generation: 0,
-            })),
-            ..Default::default()
-        };
+        let mut cache = PlaybackCache::default();
         cache.insert("test", AudioFormat::Any, player().audio_streams.remove(0));
         cache.invalidate();
         assert_eq!(cache.generation, 1);
-        assert!(cache.script.is_none());
         assert!(cache.streams.is_empty());
     }
 
@@ -1211,7 +913,7 @@ mod tests {
         let context = crate::operation::OperationContext::new(Default::default()).unwrap();
         let result = context.run(|| {
             context.cancel();
-            parse_web_player(unsupported_player_response(), "unused", "4D7u5KF7SP8")
+            parse_web_player(unsupported_player_response(), "4D7u5KF7SP8")
         });
         assert!(matches!(result, Err(Error::Cancelled)));
     }
