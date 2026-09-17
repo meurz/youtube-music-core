@@ -8,7 +8,7 @@ use rquickjs::{CatchResultExt, CaughtError, Context, Runtime};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, TryLockError};
 use std::time::{Duration, Instant};
 
 const LIBRARY: &str = include_str!("../vendor/yt-dlp-ejs/lib.min.js");
@@ -55,6 +55,7 @@ pub(crate) fn solve(
     signatures: &[String],
     n_values: &[String],
 ) -> Result<SolvedChallenges> {
+    crate::operation::check()?;
     if player.len() > MAX_PLAYER_BYTES
         || signatures.len().saturating_add(n_values.len()) > MAX_CHALLENGES
         || signatures
@@ -94,12 +95,24 @@ pub(crate) fn solve(
 
 /// Only player source enters this stage. Challenge values, signed URLs and
 /// account credentials cannot be retained in the process-wide bounded cache.
-fn prepare(player: &str) -> Result<Arc<String>> {
+pub(crate) fn prepare(player: &str) -> Result<Arc<String>> {
+    crate::operation::check()?;
+    if player.len() > MAX_PLAYER_BYTES {
+        return Err(failure("player exceeds solver input limits"));
+    }
+    crate::operation::phase("preparing_player");
     let hash: [u8; 32] = Sha256::digest(player.as_bytes()).into();
-    let mut cache = PREPARED_PLAYERS
-        .get_or_init(|| Mutex::new(VecDeque::new()))
-        .lock()
-        .map_err(|_| failure("player script cache is unavailable"))?;
+    let cache_mutex = PREPARED_PLAYERS.get_or_init(|| Mutex::new(VecDeque::new()));
+    let mut cache = loop {
+        crate::operation::check()?;
+        match cache_mutex.try_lock() {
+            Ok(cache) => break cache,
+            Err(TryLockError::WouldBlock) => std::thread::sleep(Duration::from_millis(10)),
+            Err(TryLockError::Poisoned(_)) => {
+                return Err(failure("player script cache is unavailable"))
+            }
+        }
+    };
     if let Some(index) = cache
         .iter()
         .position(|p| p.hash == hash && p.source_bytes == player.len())
@@ -150,11 +163,18 @@ fn evaluate_with_memory_limit(
 ) -> Result<String> {
     // Callers may use small native stacks (Windows, Tokio, C ABI hosts). Keep
     // QuickJS's recursion budget well below an explicitly reserved worker stack.
+    crate::operation::check()?;
+    let operation = crate::operation::current();
     let input = input.to_owned();
     std::thread::Builder::new()
         .name("ytmusic-player".into())
         .stack_size(8 * 1024 * 1024)
-        .spawn(move || evaluate_inner(&input, budget, memory_bytes))
+        .spawn(move || match operation {
+            Some(operation) => crate::operation::with_context(&operation, || {
+                evaluate_inner(&input, budget, memory_bytes)
+            }),
+            None => evaluate_inner(&input, budget, memory_bytes),
+        })
         .map_err(|_| failure("cannot initialize player solver worker"))?
         .join()
         .map_err(|_| failure("player solver worker failed"))?
@@ -166,7 +186,10 @@ fn evaluate_inner(input: &str, budget: Duration, memory_bytes: usize) -> Result<
     rt.set_gc_threshold(64 * 1024 * 1024);
     rt.set_max_stack_size(STACK_BYTES);
     let start = Instant::now();
-    rt.set_interrupt_handler(Some(Box::new(move || start.elapsed() >= budget)));
+    let operation = crate::operation::current();
+    rt.set_interrupt_handler(Some(Box::new(move || {
+        start.elapsed() >= budget || operation.as_ref().is_some_and(|op| op.check().is_err())
+    })));
     let ctx = Context::full(&rt).map_err(|_| failure("cannot initialize player solver context"))?;
     ctx.with(|ctx| {
         // A data binding keeps player text and challenges out of generated code.
@@ -179,6 +202,12 @@ fn evaluate_inner(input: &str, budget: Duration, memory_bytes: usize) -> Result<
             .and_then(|_| ctx.eval::<String, _>("JSON.stringify(jsc(JSON.parse(__solver_input)))"))
             .catch(&ctx)
             .map_err(|error| {
+                if let Err(error) = crate::operation::check() {
+                    return error;
+                }
+                if start.elapsed() >= budget {
+                    return Error::Timeout;
+                }
                 // Only fixed categories may leave the sandbox. Raw exception
                 // messages/stacks can contain player input or signed URLs.
                 let message = match error {
@@ -190,8 +219,6 @@ fn evaluate_inner(input: &str, budget: Duration, memory_bytes: usize) -> Result<
                         || message.contains("Maximum call stack size exceeded")
                     {
                         "player solver exceeded its stack budget"
-                    } else if start.elapsed() >= budget {
-                        "player solver exceeded its time budget"
                     } else {
                         "player solver failed or exceeded its resource budget"
                     },
@@ -313,7 +340,10 @@ mod tests {
         let input =
             json!({"type":"preprocessed", "preprocessed_player":"while(true) {}", "requests":[]});
         let started = Instant::now();
-        assert!(evaluate(&input.to_string(), Duration::from_millis(30)).is_err());
+        assert!(matches!(
+            evaluate(&input.to_string(), Duration::from_millis(30)),
+            Err(Error::Timeout)
+        ));
         assert!(started.elapsed() < Duration::from_secs(2));
         let error = solve(
             "throw 'private_challenge'",
@@ -326,6 +356,26 @@ mod tests {
         assert!(!error.contains("private_challenge"));
     }
 
+    #[test]
+    fn operation_interrupts_active_javascript_and_worker_inherits_deadline() {
+        use crate::operation::{OperationContext, OperationOptions};
+        for cancel in [false, true] {
+            let context = OperationContext::new(OperationOptions { timeout_ms: 150 }).unwrap();
+            let controller = context.clone();
+            let input = json!({"type":"preprocessed", "preprocessed_player":"while(true) {}", "requests":[]}).to_string();
+            let worker = std::thread::spawn(move || context.run(|| evaluate(&input, TIME_BUDGET)));
+            if cancel {
+                std::thread::sleep(Duration::from_millis(40));
+                controller.cancel();
+            }
+            let result = worker.join().unwrap();
+            if cancel {
+                assert!(matches!(result, Err(Error::Cancelled)));
+            } else {
+                assert!(matches!(result, Err(Error::Timeout)));
+            }
+        }
+    }
     #[test]
     fn solver_has_no_host_io_and_runtime_is_isolated() {
         let input = json!({"type":"preprocessed", "preprocessed_player":
