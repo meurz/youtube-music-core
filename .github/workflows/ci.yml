@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-latest, macos-15]
+        os: [ubuntu-24.04, windows-latest, windows-11-arm, macos-15]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -30,13 +30,23 @@ jobs:
       - name: Build .NET host example
         if: runner.os == 'Windows'
         run: dotnet build examples/dotnet --configuration Release
+      - name: Build Windows adaptive playback example
+        if: runner.os == 'Windows'
+        run: dotnet build examples/dotnet/windows --configuration Release
       - name: Build Windows release candidate
         if: runner.os == 'Windows'
         run: cargo build --release --locked
+      - name: Exercise .NET native cancellation and lifecycle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          dotnet build examples/dotnet-smoke --configuration Release
+          Copy-Item target/release/youtube_music_core.dll examples/dotnet-smoke/bin/Release/net8.0/
+          dotnet examples/dotnet-smoke/bin/Release/net8.0/InteropSmoke.dll
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
         with:
-          name: windows-release-candidate
+          name: ${{ matrix.os == 'windows-11-arm' && 'windows-arm64-release-candidate' || 'windows-release-candidate' }}
           path: |
             target/release/ytmusic.exe
             target/release/youtube_music_core.dll

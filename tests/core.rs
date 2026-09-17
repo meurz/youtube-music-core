@@ -154,3 +154,51 @@ fn request_validation_is_strict() {
     .validate()
     .is_ok());
 }
+
+#[test]
+fn new_protocol_requests_accept_documented_flat_fields_and_reject_extras() {
+    for source in [
+        r#"{"op":"create_playlist","title":"Fixture","privacy":"private","video_ids":[]}"#,
+        r#"{"op":"edit_playlist","playlist_id":"PLfixture","title":"Renamed"}"#,
+        r#"{"op":"queue_context","video_id":"4D7u5KF7SP8"}"#,
+        r#"{"op":"home","params":"opaque"}"#,
+        r#"{"op":"dash_manifest","video_id":"4D7u5KF7SP8"}"#,
+        r#"{"op":"rate_song","video_id":"4D7u5KF7SP8","rating":"like"}"#,
+    ] {
+        let request: youtube_music_core::Request = serde_json::from_str(source).unwrap();
+        request.validate().unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(source).unwrap();
+        value["unexpected"] = true.into();
+        assert!(serde_json::from_value::<youtube_music_core::Request>(value).is_err());
+    }
+}
+
+#[test]
+fn invalid_mutations_fail_before_bootstrap_and_hide_opaque_values() {
+    let requests = [
+        json!({"op":"rate_song","video_id":"bad-private-video","rating":"like"}),
+        json!({"op":"rate_playlist","playlist_id":"private/id","rating":"like"}),
+        json!({"op":"delete_playlist","playlist_id":"VL"}),
+        json!({"op":"edit_library","feedback_tokens":[]}),
+        json!({"op":"edit_library","feedback_tokens":["private-token\ninvalid"]}),
+        json!({"op":"subscribe","channel_id":"private-channel","subscribed":true}),
+        json!({"op":"create_playlist","title":"<private-title>"}),
+        json!({"op":"edit_playlist","playlist_id":"PLfixture"}),
+        json!({"op":"add_playlist_items","playlist_id":"PLfixture","video_ids":[]}),
+        json!({"op":"add_playlist_items","playlist_id":"PLfixture","video_ids":["private-invalid"]}),
+        json!({"op":"remove_playlist_items","playlist_id":"PLfixture","entries":[{"video_id":"4D7u5KF7SP8","set_video_id":""}]}),
+        json!({"op":"move_playlist_item","playlist_id":"PLfixture","set_video_id":"private-entry","before_set_video_id":"private-entry"}),
+    ];
+    for request in requests {
+        // A dead proxy makes accidental bootstrap return network, not invalid_input.
+        let input = json!({"config":{"proxy":"http://127.0.0.1:1","cookie":"SAPISID=private-cookie"},"request":request});
+        let output = core_call(&input.to_string());
+        let result: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(
+            result["error"]["code"], "invalid_input",
+            "{}",
+            input["request"]["op"]
+        );
+        assert!(!output.contains("private-"));
+    }
+}

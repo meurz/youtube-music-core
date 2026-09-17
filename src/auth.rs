@@ -376,48 +376,52 @@ impl MusicClient {
 
     /// Verify the selected Music account remotely. Presence of a cookie is not proof.
     pub fn account(&self) -> Result<AccountInfo> {
-        self.verified_account().map(|(account, _)| account)
+        crate::operation::ensure(|| self.verified_account().map(|(account, _)| account))
     }
 
     /// Explicit secret export for secure host storage. Pending response cookies
     /// are verified before export; failure never returns a replacement session.
     /// This may make an account request. Do not serialize the result into logs.
     pub fn browser_session(&self) -> Result<Option<BrowserSession>> {
-        {
-            let state = self.lock_session()?;
-            if state.cookie.is_none() {
-                return Ok(None);
+        crate::operation::ensure(|| {
+            {
+                let state = self.lock_session()?;
+                if state.cookie.is_none() {
+                    return Ok(None);
+                }
+                if state.verified {
+                    return state.snapshot(&self.config);
+                }
             }
-            if state.verified {
-                return state.snapshot(&self.config);
-            }
-        }
-        self.verified_account().map(|(_, session)| session)
+            self.verified_account().map(|(_, session)| session)
+        })
     }
 
     /// Visit the official Music homepage, apply server-issued cookies, and verify
     /// the selected account. Hosts may schedule this while their app is active.
     /// This cannot restore a revoked session and performs no browser import.
     pub fn refresh_session(&self) -> Result<SessionRefresh> {
-        self.require_session()?;
-        let before = self.lock_session()?.snapshot(&self.config)?;
-        self.music_page("/").map_err(|error| {
-            if matches!(error, Error::Http(401) | Error::Http(403)) {
-                Error::AuthenticationRejected
-            } else {
-                error
-            }
-        })?;
-        let (account, after) = self.verified_account()?;
-        Ok(SessionRefresh {
-            state: AuthState::Authenticated,
-            updated: before != after,
-            account,
+        crate::operation::ensure(|| {
+            self.require_session()?;
+            let before = self.lock_session()?.snapshot(&self.config)?;
+            self.music_page("/").map_err(|error| {
+                if matches!(error, Error::Http(401) | Error::Http(403)) {
+                    Error::AuthenticationRejected
+                } else {
+                    error
+                }
+            })?;
+            let (account, after) = self.verified_account()?;
+            Ok(SessionRefresh {
+                state: AuthState::Authenticated,
+                updated: before != after,
+                account,
+            })
         })
     }
 
     pub fn auth_status(&self) -> Result<AuthStatus> {
-        match self.account() {
+        crate::operation::ensure(|| match self.account() {
             Ok(account) => Ok(AuthStatus {
                 state: AuthState::Authenticated,
                 account: Some(account),
@@ -431,7 +435,7 @@ impl MusicClient {
                 account: None,
             }),
             Err(error) => Err(error),
-        }
+        })
     }
 }
 

@@ -32,12 +32,41 @@ struct Cli {
     /// Ignore saved profiles and any credentials in the configuration file.
     #[arg(long, global = true)]
     anonymous: bool,
+    /// Core operation timeout, including retries and player processing.
+    #[arg(long, global = true, default_value = "120000")]
+    timeout_ms: u64,
     #[command(subcommand)]
     command: Command,
 }
 
 #[derive(Subcommand)]
 enum Command {
+    /// Report local protocol/ABI versions and supported operations without network I/O.
+    Capabilities,
+    /// Prepare the Web player cache (reuse a persistent library client for desktop apps).
+    Prewarm,
+    /// List account choices exposed by the official Web session.
+    Accounts,
+    /// Get search completions.
+    Suggestions { query: String },
+    /// Read the home feed; reuse returned filters and continuation values.
+    Home {
+        #[arg(long)]
+        params: Option<String>,
+        #[arg(long)]
+        continuation: Option<String>,
+    },
+    /// Read the explore feed.
+    Explore {
+        #[arg(long)]
+        params: Option<String>,
+        #[arg(long)]
+        continuation: Option<String>,
+    },
+    /// Return time-aligned lyrics only when supplied by Web, otherwise plain text.
+    TimedLyrics { video_id: String },
+    /// Generate a DASH manifest for unchanged Web AAC audio (Windows adaptive playback).
+    DashManifest { video_id: String },
     /// Browser login guidance, verified session import, status, and local logout.
     Auth {
         #[command(subcommand)]
@@ -350,6 +379,32 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
         }
     }
     let request = match &cli.command {
+        Command::Capabilities => return Ok(youtube_music_core::capabilities()),
+        Command::DashManifest { video_id } => Request::DashManifest {
+            video_id: video_id.clone(),
+        },
+        Command::Prewarm => Request::Prewarm,
+        Command::Accounts => Request::Accounts,
+        Command::Suggestions { query } => Request::SearchSuggestions {
+            query: query.clone(),
+        },
+        Command::Home {
+            params,
+            continuation,
+        } => Request::Home {
+            params: params.clone(),
+            continuation: continuation.clone(),
+        },
+        Command::Explore {
+            params,
+            continuation,
+        } => Request::Explore {
+            params: params.clone(),
+            continuation: continuation.clone(),
+        },
+        Command::TimedLyrics { video_id } => Request::TimedLyrics {
+            video_id: video_id.clone(),
+        },
         Command::Auth {
             command: AuthCommand::Status,
         } => Request::AuthStatus,
@@ -410,6 +465,9 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
         }
     };
     request.validate()?;
+    if matches!(request, Request::Capabilities) {
+        return Ok(youtube_music_core::capabilities());
+    }
     let mut config = read_config(cli)?;
     let store = SessionStore::new(cli.store, &cli.profile)?;
     let mut loaded_session = None;
@@ -477,7 +535,14 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
 
 fn main() {
     let cli = Cli::parse();
-    let result = run(&cli);
+    let result = (|| {
+        let operation = youtube_music_core::operation::OperationContext::new(
+            youtube_music_core::operation::OperationOptions {
+                timeout_ms: cli.timeout_ms,
+            },
+        )?;
+        operation.run(|| run(&cli))
+    })();
     let failed = result.is_err();
     let output = youtube_music_core::envelope(result);
     println!(

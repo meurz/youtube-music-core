@@ -2,7 +2,7 @@
 
 Native Rust client for YouTube Music's unofficial Web Innertube API. Includes a reusable blocking library, the `ytmusic` JSON CLI, and a C ABI for native application hosts. Sign in on Google's official website and import the Music browser session; all subsequent API calls and audio resolution run locally without a browser, Node.js, Python, or yt-dlp process.
 
-**Status: experimental 0.6.0.** Search, browsing, accounts, all six library categories, lyrics, queues, and playback use `WEB_REMIX`. Web audio signatures and `n` parameters are resolved by a bounded embedded QuickJS engine using a pinned player parser. No TV, Android, or VR fallback is used. Google can change its private protocol or require additional playback attestation. See [validation and limitations](docs/protocol.md).
+**Status: experimental 0.7.0.** Search/suggestions, home/explore, accounts, all six library categories, library/playlist writes, lyrics, contextual queues, and playback use `WEB_REMIX`. Web audio signatures and `n` parameters are resolved by a bounded embedded QuickJS engine using a pinned player parser. No TV, Android, or VR fallback is used. Google can change its private protocol or require additional playback attestation. See [validation and limitations](docs/protocol.md).
 
 ## Install
 
@@ -11,13 +11,17 @@ Download an archive for Linux, macOS, or Windows from [Releases](https://github.
 With Rust 1.91 or newer:
 
 ```sh
-cargo install --git https://github.com/meurz/youtube-music-core --tag v0.6.0 --locked
+cargo install --git https://github.com/meurz/youtube-music-core --tag v0.7.0 --locked
 ytmusic search 'Daft Punk Get Lucky' --filter songs --pretty
 ```
 
 ## CLI
 
 ```sh
+ytmusic capabilities
+ytmusic home --pretty
+ytmusic explore --pretty
+ytmusic suggestions 'Daft'
 ytmusic search 'Daft Punk' --filter artists --pretty
 ytmusic search 'Daft Punk Get Lucky' --filter songs --pretty
 ytmusic song 4D7u5KF7SP8 --pretty
@@ -27,6 +31,7 @@ ytmusic lyrics 4D7u5KF7SP8 --pretty
 ytmusic player 4D7u5KF7SP8 --pretty
 ytmusic stream 4D7u5KF7SP8 --pretty
 ytmusic stream 4D7u5KF7SP8 --format mp4 --pretty
+ytmusic dash-manifest 4D7u5KF7SP8 --pretty
 ```
 
 Search filters: `all`, `songs`, `videos`, `albums`, `artists`, `playlists`.
@@ -93,7 +98,7 @@ Use `--profile personal` for separate accounts and `--store auto|pass|keyring` t
 | `artists` | Artists in the library |
 | `subscriptions` | Subscribed artists |
 
-All six sections use the selected Music Web account. Use a returned `browse_id` with `browse`, or a playlist ID with `playlist`. Fetch library pages with `ytmusic library playlists --continuation 'TOKEN'` (retain the original section). Each library call verifies `account/account_menu`; rejected sessions cannot masquerade as empty libraries. This release provides read-only library access.
+All six sections use the selected Music Web account. Use a returned `browse_id` with `browse`, or a playlist ID with `playlist`. Fetch library pages with `ytmusic library playlists --continuation 'TOKEN'` (retain the original section). Each library call verifies `account/account_menu`; rejected sessions cannot masquerade as empty libraries. Library and playlist writes are also available through Rust and JSON `call`; see the request examples below.
 
 **Upgrading from 0.4:** existing browser profiles still work. TV OAuth profiles are not convertible to browser sessions and now return an explicit import instruction; run `ytmusic auth import --browser-port 9222` or import browser headers into the same profile. The import replaces the selected profile only after account verification. Rust OAuth APIs and the `android_vr` playback setting were removed; migrate hosts to `BrowserSession` and `web_remix`/`auto` (both Web-only).
 
@@ -103,15 +108,57 @@ All six sections use the selected Music Web account. Use a returned `browse_id` 
 
 The result includes `url`, `itag`, `mime_type`, `bitrate`, `content_length`, `expires_at` (Unix seconds), `source_client`, and `http_headers`. Pass those playback headers along with the URL to your media player. No account cookies are included. `verification` records the HTTP status, bytes read, and content type of a successful probe. The core reads at most 4 KiB per probe and checks the byte range and container header. URLs can expire or be tied to the requesting IP; resolve again after expiry or a later playback failure. A successful initial probe does not guarantee the entire track will remain available.
 
-First use analyzes the current player script and can take tens of seconds. The process caches up to two prepared scripts, making subsequent calls faster; separate CLI invocations repeat that initial work. Reuse the Rust client or keep the shared library loaded for repeated playback.
+First use analyzes the current player script and can take tens of seconds. Reuse a persistent client and schedule `prewarm` off the UI thread. Player source expires after six hours; up to eight verified streams are cached for five minutes while they have more than 90 seconds of validity left. `prefetch` resolves one to three upcoming tracks, `stream_refresh` bypasses a track’s URL cache, and `playback_reset` invalidates source/URL state. Qualifying stream failures get one fresh bootstrap. Separate CLI processes repeat cold preparation; a one-shot `ytmusic prewarm` does not warm another process.
 
-`player` exposes candidate formats without CDN probing; their `verification` field is `null`. Use `stream` when handing a URL to a player. This release was tested with real Opus and M4A CDN responses and one-second audio decoding; FFmpeg was used for validation only and is not a runtime dependency.
+`player` exposes candidate formats without CDN probing; their `verification` field is `null`. Use `stream` when handing a URL to a player. For Windows AAC playback, use `dash_manifest` with `AdaptiveMediaSource` as shown
+in the [WinUI guide](docs/winui-host.md); raw fragmented M4A URI playback ended
+prematurely in the tested Windows player. The MPD retains the original media
+bytes and encoder edit list. Direct WebM/Opus passed actual Windows playback,
+seek, rapid source switching, HTTP failure recovery and a full track through
+`MediaEnded`. No FFmpeg or local proxy is a runtime dependency.
 
 Send a request through stdin:
 
 ```sh
 printf '%s\n' '{"op":"search","query":"Daft Punk","filter":"songs"}' | ytmusic call
 ```
+
+### Discovery, library edits and desktop playback
+
+The full API is exposed as JSON Request objects through `ytmusic call` and the
+persistent C ABI. Examples below are individual requests; send one per call:
+
+```json
+{"op":"home","params":null,"continuation":null}
+{"op":"queue_context","video_id":"4D7u5KF7SP8","index":0}
+{"op":"prewarm"}
+{"op":"prefetch","video_ids":["4D7u5KF7SP8"],"format":"mp4"}
+{"op":"stream_refresh","video_id":"4D7u5KF7SP8","format":"mp4"}
+{"op":"create_playlist","title":"My queue","privacy":"private","video_ids":[]}
+{"op":"rate_song","video_id":"4D7u5KF7SP8","rating":"like"}
+```
+
+Writes include ratings (`indifferent` removes a rating), saved-library actions,
+subscriptions, playlist creation/deletion/metadata/privacy, and track
+append/remove/reorder. Returned `actions` contain available state and save/remove
+tokens; unique `set_video_id` values identify playlist entries, including duplicate
+songs. Reload state after editing and use fresh action tokens. See the
+[complete request reference](docs/protocol.md#desktop-json-contract--protocol-11--abi-2)
+for exact fields. Queue/create/edit fields are flat, never nested under `context`
+or `options`.
+
+Home/explore expose filter parameters and feed continuations separately from
+carousel continuations. `timed_lyrics` uses official Web timings if present;
+otherwise it returns plain text with `timed:false` and
+`timing_availability:"not_provided_by_web"`. `accounts` lists identities exposed
+by the imported Music session, with reusable selectors when available. Verified
+account selection returns a new independent client; browser-wide account
+enumeration and recovery of revoked sessions are not implied.
+
+Errors add `retryable`, optional `http_status`, `retry_after_seconds` and
+`cause_code`. An uncertain failure after sending a write returns
+`mutation_outcome_unknown` with `retryable:false`: cancellation does not prove
+that the server rolled back the change. Reload and reconcile before retrying.
 
 ## Configuration
 
@@ -130,9 +177,9 @@ Prefer `auth import` for secure credential storage. Config cookies require a pri
 
 The client discovers the current WEB_REMIX version and visitor data from the Music homepage. `client_version` can override catalog bootstrap. Playback discovers the official player script from the Music watch page, downloads it without account headers, and caches it per client. Only official YouTube HTTPS player-script URLs are accepted. The embedded solver has no filesystem, network, process, or host callbacks and enforces time/memory/stack limits. Its pinned source and licenses are in [vendor](vendor/yt-dlp-ejs/README.md); it does not download replacement solver code at runtime.
 
-Cookies are sent only to the fixed Music origin; CDN requests have no account credentials. API/static-script redirects are rejected. Media probes allow at most three redirects restricted to HTTPS Google video CDN URLs, trying at most eight formats. API responses are limited to 16 MiB. There are no transport retries. Request timeouts apply per request; bootstrapping, player-script processing, and probes can take multiple timeouts. Standard proxy environment variables are supported; signed media URLs may be tied to the requesting IP.
+Cookies are sent only to the fixed Music origin; CDN requests have no account credentials. API/static-script redirects are rejected. Media probes allow at most three redirects restricted to HTTPS Google video CDN URLs, trying at most eight formats. API responses are limited to 16 MiB. Eligible reads retry network errors/timeouts and HTTP 429/502/503/504 at most three attempts, honoring server retry delays up to ten seconds. Writes never retry automatically. A total-operation deadline includes bootstrap, player work, retries and probes; the default is 120 seconds (`--timeout-ms` in the CLI), in addition to per-request timeouts. Native operation handles can cancel HTTP I/O, QuickJS execution and lock waits; CLI Ctrl+C requests cancellation. Standard proxy environment variables are supported; signed media URLs may be tied to the requesting IP.
 
-Music responses now update root-scoped Cookie values and expiry metadata. The CLI verifies changed sessions before saving them to its encrypted profile; `auth refresh` explicitly visits the Music homepage, verifies the account, and saves updates. A newer import or logout wins over a late automatic save. Normal command results remain available if background persistence fails, with a sanitized stderr warning; explicit refresh reports failure. This maintains an active session without a browser process, but cannot restore a revoked session: re-import when rejected. PO-token generation, DRM, SABR delivery, and account-library writes are not implemented. If Google requires additional attestation or changes the player layout, the core reports an error instead of switching to another client.
+Music responses now update root-scoped Cookie values and expiry metadata. The CLI verifies changed sessions before saving them to its encrypted profile; `auth refresh` explicitly visits the Music homepage, verifies the account, and saves updates. A newer import or logout wins over a late automatic save. Normal command results remain available if background persistence fails, with a sanitized stderr warning; explicit refresh reports failure. This maintains an active session without a browser process, but cannot restore a revoked session: re-import when rejected. PO-token generation, DRM and SABR delivery are not implemented. If Google requires additional attestation or changes the player layout, the core reports an error instead of switching to another client.
 
 ## Rust library
 
@@ -179,7 +226,17 @@ let refresh = client.refresh_session()?; // metadata only; export again to persi
 See [include/youtube_music_core.h](include/youtube_music_core.h) and [examples/ffi.c](examples/ffi.c).
 `ytmusic_core_call` accepts `{"config":{},"request":{"op":"search","query":"Daft Punk"}}` and returns an allocated UTF-8 JSON string. Release it exactly once with `ytmusic_string_free`. Do not use the host allocator. This legacy entry point is synchronous and creates a new client for each call. It does not return or persist updated session credentials.
 
-For desktop hosts, retain a handle from `ytmusic_client_create(config_json)` and pass inner Request objects to `ytmusic_client_call(handle, request_json)`. Export verified Cookie state only through `ytmusic_client_export_session(handle)` into secure host storage, then release the handle with `ytmusic_client_destroy(handle)`. All results use the same JSON envelope and string allocator. Destroyed handles are rejected; already-running calls finish safely. `auth_refresh` returns metadata, never cookies. See the [compilable .NET wrapper](examples/dotnet) and [WinUI 3 host guide and remaining work](docs/winui-host.md).
+For desktop hosts, retain a handle from `ytmusic_client_create(config_json)` and pass inner Request objects to `ytmusic_client_call(handle, request_json)`. Export verified Cookie state only through `ytmusic_client_export_session(handle)` into secure host storage, then release the handle with `ytmusic_client_destroy(handle)`. All results use the same JSON envelope and string allocator. Destroyed handles are rejected; already-running calls finish safely. `auth_refresh` returns metadata, never cookies. See the [compilable .NET wrapper](examples/dotnet) and [WinUI 3 host guide](docs/winui-host.md).
+
+ABI 2 adds caller-controlled operations. Allocate a single-use handle with
+`ytmusic_operation_create({"timeout_ms":120000})`, then dispatch a
+`ytmusic_client_*_with_operation` call on a worker. Poll
+`ytmusic_operation_status` or signal `ytmusic_operation_cancel` from another
+thread, and always destroy the operation handle. The deadline starts at
+allocation and includes queue waits. `ytmusic_client_select_account` also takes
+an operation and returns a new verified client handle. The .NET wrapper connects
+native cancellation to `CancellationToken`. `ytmusic_capabilities()` reports
+protocol 1.1 / ABI 2 and limits without creating a client or making a request.
 
 The CLI's `call` command accepts the inner `request` object; the C ABI accepts the wrapper with optional `config`. Account operations are `{"op":"auth_status"}`, `{"op":"account"}`, and `{"op":"library","section":"playlists","continuation":null}`. The C host supplies browser `cookie`, `auth_user`, and optional `delegated_session_id` in `config` from its own secure store; the library does not implicitly load CLI profiles.
 
@@ -194,6 +251,6 @@ cargo test --locked
 cargo build --release --locked
 ```
 
-Tests run offline using reduced public responses and edge-case fixtures. GitHub Actions checks Linux, Windows, and macOS and builds five native release targets. Live probes are manual because region, account state, catalog changes, and anti-bot controls are outside the library's control.
+Tests run offline using reduced public responses and edge-case fixtures. GitHub Actions checks Linux, Windows, and macOS. The release matrix covers Linux x64/ARM64, Windows x64/ARM64 and macOS Intel/Apple Silicon; each archive requires its native release build to pass. Live probes are manual because region, account state, catalog changes, and anti-bot controls are outside the library's control.
 
 This project is unofficial and is not affiliated with Google or YouTube. MIT licensed.

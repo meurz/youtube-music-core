@@ -32,6 +32,24 @@ char *ytmusic_client_export_session(uint64_t handle);
  * Does not cancel requests. Future calls and repeated destroy return invalid_input. */
 char *ytmusic_client_destroy(uint64_t handle);
 
+/* ABI 2 adds single-use operations. Allocate before dispatching a worker, then
+ * cancel/status from another thread. timeout_ms is 1..600000 (default 120000),
+ * measured from allocation, including queue/lock waits. Free result strings and
+ * destroy operation handles. Destroy cancels an active operation safely.
+ * Cancellation after a mutation was sent does NOT prove it was not committed;
+ * reconcile state before retrying any write. */
+uint32_t ytmusic_abi_version(void);
+char *ytmusic_capabilities(void);
+char *ytmusic_operation_create(const char *options);
+char *ytmusic_operation_cancel(uint64_t operation);
+char *ytmusic_operation_status(uint64_t operation);
+char *ytmusic_operation_destroy(uint64_t operation);
+char *ytmusic_client_create_with_operation(const char *config, uint64_t operation);
+char *ytmusic_client_call_with_operation(uint64_t handle, const char *request, uint64_t operation);
+char *ytmusic_client_export_session_with_operation(uint64_t handle, uint64_t operation);
+/* Verified independent client, returning a new handle. No secrets in result. */
+char *ytmusic_client_select_account(uint64_t handle, const char *selector, uint64_t operation);
+
 /* Clears and releases a JSON result, including secret exports. NULL is accepted. */
 void ytmusic_string_free(char *output);
 #ifdef __cplusplus

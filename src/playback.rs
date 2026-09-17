@@ -1,22 +1,131 @@
+use crate::transport::Response;
 use crate::{
-    client::{checked_response, config_string, network, validate_video_id},
+    client::{checked_response, config_string, validate_video_id},
     model::{AudioFormat, AudioStream, Player, StreamVerification},
     parse, Error, MusicClient, Result,
 };
-use reqwest::{blocking::Response, Url};
+use reqwest::Url;
+use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, VecDeque},
     io::Read,
-    time::{SystemTime, UNIX_EPOCH},
+    sync::Arc,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 const WEB_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const PROBE_BYTES: u64 = 4096;
 
-pub(crate) struct WebPlayerScript {
+const SCRIPT_TTL: Duration = Duration::from_secs(6 * 60 * 60);
+const STREAM_TTL: Duration = Duration::from_secs(5 * 60);
+const EXPIRY_MARGIN_SECONDS: u64 = 90;
+const MAX_STREAM_CACHE: usize = 8;
+const MAX_PREFETCH: usize = 3;
+
+struct WebPlayerScript {
     source: String,
     timestamp: u32,
+    loaded_at: Instant,
+    generation: u64,
+}
+
+struct CachedStream {
+    video_id: String,
+    format: u8,
+    loaded_at: Instant,
+    audio: AudioStream,
+}
+
+/// Per-client cache. Contains signed media URLs, so never serialize or log it.
+#[derive(Default)]
+pub(crate) struct PlaybackCache {
+    generation: u64,
+    script: Option<Arc<WebPlayerScript>>,
+    streams: VecDeque<CachedStream>,
+}
+
+impl PlaybackCache {
+    fn invalidate(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+        self.script = None;
+        self.streams.clear();
+    }
+
+    fn stream(
+        &mut self,
+        video_id: &str,
+        format: AudioFormat,
+        now: Instant,
+        unix: u64,
+    ) -> Option<AudioStream> {
+        self.streams.retain(|entry| {
+            now.saturating_duration_since(entry.loaded_at) < STREAM_TTL
+                && entry
+                    .audio
+                    .expires_at
+                    .is_some_and(|expiry| expiry > unix.saturating_add(EXPIRY_MARGIN_SECONDS))
+        });
+        let index = self
+            .streams
+            .iter()
+            .position(|entry| entry.video_id == video_id && entry.format == format_key(format))?;
+        let entry = self.streams.remove(index)?;
+        let audio = entry.audio.clone();
+        self.streams.push_back(entry);
+        Some(audio)
+    }
+
+    fn insert(&mut self, video_id: &str, format: AudioFormat, audio: AudioStream) {
+        // Missing expiry is legal for a one-shot stream, never for cached reuse.
+        if audio.expires_at.is_none() {
+            return;
+        }
+        self.streams
+            .retain(|entry| entry.video_id != video_id || entry.format != format_key(format));
+        if self.streams.len() >= MAX_STREAM_CACHE {
+            self.streams.pop_front();
+        }
+        self.streams.push_back(CachedStream {
+            video_id: video_id.into(),
+            format: format_key(format),
+            loaded_at: Instant::now(),
+            audio,
+        });
+    }
+}
+
+fn format_key(format: AudioFormat) -> u8 {
+    match format {
+        AudioFormat::Any => 0,
+        AudioFormat::Mp4 => 1,
+        AudioFormat::Webm => 2,
+    }
+}
+
+fn unix_now() -> Result<u64> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .map_err(|_| Error::MediaValidation("system clock before Unix epoch".into()))
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PlaybackWarmup {
+    pub ready: bool,
+    pub signature_timestamp: u32,
+    pub generation: u64,
+}
+
+fn must_propagate(error: &Error) -> bool {
+    matches!(
+        error,
+        Error::Cancelled
+            | Error::Timeout
+            | Error::RateLimited { .. }
+            | Error::Network(_)
+            | Error::Http(429 | 500..=599)
+    )
 }
 
 fn player_script_url(html: &str) -> Result<Url> {
@@ -187,6 +296,9 @@ fn parse_web_player(mut raw: Value, script: &str, video_id: &str) -> Result<Play
     let mut player = match resolve_web_urls(&mut raw, script) {
         Ok(()) => parse::resolved_web_player(&raw)?,
         Err(error) => {
+            if must_propagate(&error) {
+                return Err(error);
+            }
             metadata.resolution_error = Some(match error {
                 Error::StreamUnavailable(message) => message,
                 other => other.to_string(),
@@ -210,32 +322,112 @@ fn parse_web_player(mut raw: Value, script: &str, video_id: &str) -> Result<Play
 }
 
 impl MusicClient {
-    fn web_player_script(&self, video_id: &str) -> Result<&WebPlayerScript> {
-        if self.web_player.get().is_none() {
-            let html = self.music_page(&format!("/watch?v={video_id}"))?;
-            let url = player_script_url(&html)?;
-            // Static player code needs no account headers. Reject all redirects.
-            let source = checked_response(self.http.get(url).send().map_err(network)?)?;
-            let timestamp = crate::decipher::signature_timestamp(&source)
-                .ok_or_else(|| Error::Protocol("Web player has no signature timestamp".into()))?;
-            let _ = self.web_player.set(WebPlayerScript { source, timestamp });
-        }
-        self.web_player
-            .get()
-            .ok_or_else(|| Error::Protocol("Web player bootstrap failed".into()))
+    fn playback_cache(&self) -> Result<std::sync::MutexGuard<'_, PlaybackCache>> {
+        crate::operation::lock(&self.playback)
     }
 
-    /// Inspect the Web player and resolve its signature/n challenges without CDN probing.
-    pub fn player(&self, video_id: &str) -> Result<Player> {
-        validate_video_id(video_id)?;
-        let script = self.web_player_script(video_id)?;
+    fn web_player_script(&self, video_id: Option<&str>) -> Result<Arc<WebPlayerScript>> {
+        crate::operation::check()?;
+        let generation = {
+            let mut cache = self.playback_cache()?;
+            if let Some(script) = &cache.script {
+                if script.loaded_at.elapsed() < SCRIPT_TTL {
+                    return Ok(Arc::clone(script));
+                }
+                cache.invalidate();
+            }
+            cache.generation
+        };
+        crate::operation::phase("loading_player");
+        let path = video_id
+            .map(|id| format!("/watch?v={id}"))
+            .unwrap_or_else(|| "/".into());
+        let html = self.music_page(&path)?;
+        let url = player_script_url(&html)?;
+        // Static player code needs no account headers. Reject all redirects.
+        let source =
+            checked_response(self.send(self.http.get(url), 16 * 1024 * 1024, false, true)?)?;
+        let timestamp = crate::decipher::signature_timestamp(&source)
+            .ok_or_else(|| Error::Protocol("Web player has no signature timestamp".into()))?;
+        let script = Arc::new(WebPlayerScript {
+            source,
+            timestamp,
+            loaded_at: Instant::now(),
+            generation,
+        });
+        let mut cache = self.playback_cache()?;
+        // Explicit invalidation wins over an older bootstrap completing later.
+        if cache.generation == generation {
+            if let Some(current) = &cache.script {
+                return Ok(Arc::clone(current));
+            }
+            cache.script = Some(Arc::clone(&script));
+        }
+        Ok(script)
+    }
+
+    /// Fetch and actually prepare the current official player ahead of playback.
+    /// Schedule this off the UI thread. No media URL or credentials are returned.
+    pub fn prewarm(&self) -> Result<PlaybackWarmup> {
+        crate::operation::ensure(|| self.prewarm_inner())
+    }
+
+    fn prewarm_inner(&self) -> Result<PlaybackWarmup> {
+        let script = self.web_player_script(None)?;
+        crate::decipher::prepare(&script.source)?;
+        crate::operation::check()?;
+        Ok(PlaybackWarmup {
+            ready: true,
+            signature_timestamp: script.timestamp,
+            generation: script.generation,
+        })
+    }
+
+    /// Forget script and media caches. In-flight older results cannot repopulate them.
+    pub fn invalidate_playback(&self) -> Result<()> {
+        self.playback_cache()?.invalidate();
+        Ok(())
+    }
+
+    fn invalidate_generation(&self, generation: u64) -> Result<()> {
+        let mut cache = self.playback_cache()?;
+        if cache.generation == generation {
+            cache.invalidate();
+        }
+        Ok(())
+    }
+
+    fn player_once(&self, video_id: &str) -> Result<(Player, u64)> {
+        crate::operation::check()?;
+        let script = self.web_player_script(Some(video_id))?;
         let mut body = json!({"videoId":video_id,"contentCheckOk":true,"racyCheckOk":true,
             "playbackContext":{"contentPlaybackContext":{"signatureTimestamp":script.timestamp,"html5Preference":"HTML5_PREF_WANTS"}}});
         if let Some(token) = &self.config.po_token {
             body["serviceIntegrityDimensions"] = json!({"poToken":token});
         }
+        crate::operation::phase("requesting_stream");
         let raw = self.post("player", body)?;
-        parse_web_player(raw, &script.source, video_id)
+        crate::operation::phase("resolving_stream");
+        Ok((
+            parse_web_player(raw, &script.source, video_id)?,
+            script.generation,
+        ))
+    }
+
+    /// Inspect the Web player and resolve signature/n challenges without CDN probing.
+    /// Rebootstrap once on transform failure to recover from stale player scripts.
+    pub fn player(&self, video_id: &str) -> Result<Player> {
+        crate::operation::ensure(|| self.player_inner(video_id))
+    }
+
+    fn player_inner(&self, video_id: &str) -> Result<Player> {
+        validate_video_id(video_id)?;
+        let (player, generation) = self.player_once(video_id)?;
+        if player.resolution_error.is_some() {
+            self.invalidate_generation(generation)?;
+            return self.player_once(video_id).map(|(player, _)| player);
+        }
+        Ok(player)
     }
 
     /// Return the highest-bitrate Web audio format that passes a bounded CDN GET.
@@ -243,11 +435,100 @@ impl MusicClient {
         self.stream_format(video_id, AudioFormat::Any)
     }
 
-    /// Resolve and validate Web audio in a host-compatible container.
+    /// Reuse a recently verified URL only while its expiry has a safe margin.
     pub fn stream_format(&self, video_id: &str, format: AudioFormat) -> Result<AudioStream> {
-        select_verified(self.player(video_id)?, format, |audio| {
-            self.probe_audio(audio)
+        self.stream_format_with_options(video_id, format, false)
+    }
+
+    /// Force a new player response after a host sees an expired/rejected media URL.
+    pub fn stream_format_with_options(
+        &self,
+        video_id: &str,
+        format: AudioFormat,
+        force_refresh: bool,
+    ) -> Result<AudioStream> {
+        crate::operation::ensure(|| {
+            self.stream_format_with_options_inner(video_id, format, force_refresh)
         })
+    }
+
+    fn stream_format_with_options_inner(
+        &self,
+        video_id: &str,
+        format: AudioFormat,
+        force_refresh: bool,
+    ) -> Result<AudioStream> {
+        validate_video_id(video_id)?;
+        crate::operation::check()?;
+        {
+            let mut cache = self.playback_cache()?;
+            // A stale script also invalidates all URLs derived from it.
+            if cache
+                .script
+                .as_ref()
+                .is_some_and(|script| script.loaded_at.elapsed() >= SCRIPT_TTL)
+            {
+                cache.invalidate();
+            }
+            if force_refresh {
+                cache.streams.retain(|entry| entry.video_id != video_id);
+            } else if let Some(audio) = cache.stream(video_id, format, Instant::now(), unix_now()?)
+            {
+                return Ok(audio);
+            }
+        }
+        for attempt in 0..2 {
+            let (player, generation) = self.player_once(video_id)?;
+            crate::operation::phase("verifying_stream");
+            match select_verified(player, format, |audio| self.probe_audio(audio)) {
+                Ok(audio) => {
+                    crate::operation::check()?;
+                    let mut cache = self.playback_cache()?;
+                    if cache.generation == generation {
+                        cache.insert(video_id, format, audio.clone());
+                    }
+                    return Ok(audio);
+                }
+                Err(error)
+                    if attempt == 0
+                        && matches!(
+                            error,
+                            Error::StreamUnavailable(_)
+                                | Error::StreamResolutionRequired
+                                | Error::MediaValidation(_)
+                                | Error::Http(403 | 410)
+                        ) =>
+                {
+                    self.invalidate_generation(generation)?;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("second stream resolution always returns")
+    }
+
+    /// Resolve up to three upcoming tracks serially. The host owns queue scheduling.
+    pub fn prefetch(&self, video_ids: &[String], format: AudioFormat) -> Result<Vec<AudioStream>> {
+        crate::operation::ensure(|| self.prefetch_inner(video_ids, format))
+    }
+
+    fn prefetch_inner(
+        &self,
+        video_ids: &[String],
+        format: AudioFormat,
+    ) -> Result<Vec<AudioStream>> {
+        if video_ids.is_empty() || video_ids.len() > MAX_PREFETCH {
+            return Err(Error::InvalidInput(
+                "prefetch requires between one and three video IDs".into(),
+            ));
+        }
+        for id in video_ids {
+            validate_video_id(id)?;
+        }
+        video_ids
+            .iter()
+            .map(|id| self.stream_format(id, format))
+            .collect()
     }
 
     fn probe_audio(&self, audio: &mut AudioStream) -> Result<()> {
@@ -269,7 +550,8 @@ impl MusicClient {
             for (key, value) in &audio.http_headers {
                 request = request.header(key, value);
             }
-            let response = request.send().map_err(network)?;
+            crate::operation::check()?;
+            let response = self.send(request, PROBE_BYTES as usize, true, true)?;
             if response.status().is_redirection() {
                 if redirect == 3 {
                     return Err(Error::MediaValidation("too many media redirects".into()));
@@ -327,8 +609,10 @@ fn select_verified(
     let mut errors = Vec::new();
     // Bound CDN requests if a malformed upstream response contains many formats.
     for mut audio in player.audio_streams.into_iter().take(8) {
+        crate::operation::check()?;
         match probe(&mut audio) {
             Ok(()) => return Ok(audio),
+            Err(error) if must_propagate(&error) => return Err(error),
             Err(error) => errors.push(format!("itag {}: {error}", audio.itag)),
         }
     }
@@ -357,7 +641,7 @@ fn media_url(raw: &str) -> Result<Url> {
 fn check_media_response(response: Response, mime: &str) -> Result<StreamVerification> {
     let status = response.status().as_u16();
     if status != 200 && status != 206 {
-        return Err(Error::Http(status));
+        return Err(crate::transport::status_error(&response));
     }
     let content_type = response
         .headers()
@@ -451,13 +735,12 @@ mod tests {
             socket.write_all(headers.as_bytes()).unwrap();
             socket.write_all(&body).unwrap();
         });
-        let response = reqwest::blocking::Client::builder()
+        let request = reqwest::Client::builder()
             .no_proxy()
             .build()
             .unwrap()
-            .get(format!("http://{address}/"))
-            .send()
-            .unwrap();
+            .get(format!("http://{address}/"));
+        let response = crate::transport::send(request, PROBE_BYTES as usize, true, false).unwrap();
         server.join().unwrap();
         response
     }
@@ -701,6 +984,104 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn stream_cache_enforces_expiry_ttl_container_and_bounds() {
+        let mut cache = PlaybackCache::default();
+        let now = Instant::now();
+        let mut audio = player().audio_streams.remove(0);
+        audio.expires_at = Some(1000);
+        cache.insert("test", AudioFormat::Webm, audio.clone());
+        assert!(cache.stream("test", AudioFormat::Mp4, now, 100).is_none());
+        assert!(cache.stream("test", AudioFormat::Webm, now, 100).is_some());
+        assert!(cache.stream("test", AudioFormat::Webm, now, 910).is_none());
+        cache.insert("test", AudioFormat::Webm, audio.clone());
+        assert!(cache
+            .stream(
+                "test",
+                AudioFormat::Webm,
+                now + STREAM_TTL + Duration::from_secs(1),
+                100
+            )
+            .is_none());
+        for id in 0..MAX_STREAM_CACHE + 2 {
+            cache.insert(&id.to_string(), AudioFormat::Any, audio.clone());
+        }
+        assert_eq!(cache.streams.len(), MAX_STREAM_CACHE);
+        assert!(cache.stream("0", AudioFormat::Any, now, 100).is_none());
+        assert!(cache.stream("9", AudioFormat::Any, now, 100).is_some());
+        audio.expires_at = None;
+        cache.insert("unknown", AudioFormat::Any, audio);
+        assert!(cache
+            .stream("unknown", AudioFormat::Any, now, 100)
+            .is_none());
+    }
+
+    #[test]
+    fn invalidation_removes_signed_urls_and_advances_generation() {
+        let mut cache = PlaybackCache {
+            script: Some(Arc::new(WebPlayerScript {
+                source: String::new(),
+                timestamp: 1,
+                loaded_at: Instant::now(),
+                generation: 0,
+            })),
+            ..Default::default()
+        };
+        cache.insert("test", AudioFormat::Any, player().audio_streams.remove(0));
+        cache.invalidate();
+        assert_eq!(cache.generation, 1);
+        assert!(cache.script.is_none());
+        assert!(cache.streams.is_empty());
+    }
+
+    #[test]
+    fn cancellation_and_rate_limits_never_try_another_format() {
+        for kind in 0..3 {
+            let mut calls = 0;
+            let error = select_verified(player(), AudioFormat::Any, |_| {
+                calls += 1;
+                Err(match kind {
+                    0 => Error::Cancelled,
+                    1 => Error::Timeout,
+                    _ => Error::RateLimited {
+                        retry_after_seconds: Some(60),
+                    },
+                })
+            })
+            .unwrap_err();
+            assert!(must_propagate(&error));
+            assert_eq!(calls, 1);
+        }
+    }
+
+    #[test]
+    fn cancelled_resolution_does_not_become_metadata_success() {
+        let context = crate::operation::OperationContext::new(Default::default()).unwrap();
+        let result = context.run(|| {
+            context.cancel();
+            parse_web_player(unsupported_player_response(), "unused", "4D7u5KF7SP8")
+        });
+        assert!(matches!(result, Err(Error::Cancelled)));
+    }
+
+    #[test]
+    fn prefetch_validates_entire_batch_before_network() {
+        let client = MusicClient::new(crate::Config {
+            client_version: Some("test".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        for ids in [
+            vec![],
+            vec!["4D7u5KF7SP8".into(); 4],
+            vec!["4D7u5KF7SP8".into(), "invalid!".into()],
+        ] {
+            assert!(matches!(
+                client.prefetch(&ids, AudioFormat::Any),
+                Err(Error::InvalidInput(_))
+            ));
+        }
+    }
     #[test]
     fn untrusted_cdn_urls_and_redirect_targets_are_rejected() {
         assert!(media_url("https://rr1.googlevideo.com/videoplayback?id=test").is_ok());

@@ -78,6 +78,27 @@ pub struct Item {
     pub duration_seconds: Option<u64>,
     pub thumbnails: Vec<Thumbnail>,
     pub explicit: bool,
+    /// Unknown is distinct from a server-declared unavailable/greyed-out item.
+    #[serde(default)]
+    pub available: Option<bool>,
+    #[serde(default)]
+    pub playlist_id: Option<String>,
+    /// Unique playlist entry identifier, including for duplicate videos.
+    #[serde(default)]
+    pub set_video_id: Option<String>,
+    #[serde(default)]
+    pub actions: ItemActions,
+}
+
+/// Only server-advertised state is populated; absence never means `false`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ItemActions {
+    pub rating: Option<crate::mutations::Rating>,
+    pub in_library: Option<bool>,
+    pub subscribed: Option<bool>,
+    pub can_edit: Option<bool>,
+    pub add_library_token: Option<String>,
+    pub remove_library_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +112,11 @@ pub struct Section {
 pub struct Page {
     pub title: Option<String>,
     pub sections: Vec<Section>,
+    #[serde(default)]
+    pub playlist_id: Option<String>,
+    /// Header actions describe this album/artist/playlist, never its first song.
+    #[serde(default)]
+    pub actions: ItemActions,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +129,13 @@ pub struct Track {
     pub thumbnails: Vec<Thumbnail>,
 }
 
+/// Inclusive byte range advertised by the official player response.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ByteRange {
+    pub start: u64,
+    pub end: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioStream {
     pub itag: u64,
@@ -111,6 +144,17 @@ pub struct AudioStream {
     pub bitrate: Option<u64>,
     pub content_length: Option<u64>,
     pub audio_quality: Option<String>,
+    #[serde(default)]
+    pub init_range: Option<ByteRange>,
+    #[serde(default)]
+    pub index_range: Option<ByteRange>,
+    /// Exact millisecond value advertised as approxDurationMs, not rounded track seconds.
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub audio_sample_rate: Option<u32>,
+    #[serde(default)]
+    pub audio_channels: Option<u32>,
     /// Unix timestamp from the signed URL. Resolve again after expiry.
     #[serde(default)]
     pub expires_at: Option<u64>,

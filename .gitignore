@@ -6,3 +6,8 @@
 *.log
 /examples/dotnet/bin/
 /examples/dotnet/obj/
+
+/examples/dotnet-smoke/bin/
+/examples/dotnet-smoke/obj/
+/examples/dotnet/windows/bin/
+/examples/dotnet/windows/obj/
