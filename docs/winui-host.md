@@ -4,9 +4,8 @@ Version 0.7 provides the core protocol, session, discovery, library editing and
 playback lifecycle needed by a desktop Music client. It does not include a WinUI
 application or media decoder. Start with the [.NET 8 wrapper](../examples/dotnet/README.md)
 and [C ABI contract](../include/youtube_music_core.h). Ship the native DLL matching
-the application architecture beside the executable. Windows x64 is exercised by
-CI; a Windows ARM64 target is included in the release workflow, with native build
-validation performed by that workflow.
+the application architecture beside the executable. Windows x64 and ARM64 are exercised by native Rust and .NET CI jobs and have
+matching release targets.
 
 ## Core and host responsibilities
 
