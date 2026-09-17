@@ -129,6 +129,13 @@ pub struct Track {
     pub thumbnails: Vec<Thumbnail>,
 }
 
+/// Inclusive byte range advertised by the official player response.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ByteRange {
+    pub start: u64,
+    pub end: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioStream {
     pub itag: u64,
@@ -137,6 +144,17 @@ pub struct AudioStream {
     pub bitrate: Option<u64>,
     pub content_length: Option<u64>,
     pub audio_quality: Option<String>,
+    #[serde(default)]
+    pub init_range: Option<ByteRange>,
+    #[serde(default)]
+    pub index_range: Option<ByteRange>,
+    /// Exact millisecond value advertised as approxDurationMs, not rounded track seconds.
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub audio_sample_rate: Option<u32>,
+    #[serde(default)]
+    pub audio_channels: Option<u32>,
     /// Unix timestamp from the signed URL. Resolve again after expiry.
     #[serde(default)]
     pub expires_at: Option<u64>,

@@ -442,6 +442,12 @@ pub fn page(v: &Value) -> Result<Page> {
     })
 }
 
+fn byte_range(value: &Value) -> Option<ByteRange> {
+    let start = number(&value["start"])?;
+    let end = number(&value["end"])?;
+    (start <= end).then_some(ByteRange { start, end })
+}
+
 pub fn player(v: &Value) -> Result<Player> {
     parse_player(v, false)
 }
@@ -499,6 +505,11 @@ fn parse_player(v: &Value, resolved: bool) -> Result<Player> {
             bitrate: number(&format["bitrate"]),
             content_length: number(&format["contentLength"]),
             audio_quality: format["audioQuality"].as_str().map(str::to_owned),
+            init_range: byte_range(&format["initRange"]),
+            index_range: byte_range(&format["indexRange"]),
+            duration_ms: number(&format["approxDurationMs"]),
+            audio_sample_rate: number(&format["audioSampleRate"]).and_then(|n| n.try_into().ok()),
+            audio_channels: number(&format["audioChannels"]).and_then(|n| n.try_into().ok()),
             http_headers: Default::default(),
             source_client: None,
             verification: None,
