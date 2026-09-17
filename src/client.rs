@@ -244,6 +244,8 @@ impl MusicClient {
             sabr: Mutex::default(),
             po_tokens: Mutex::default(),
         };
+        // Preconfigured anonymous bundles must supply their exact visitor_data.
+        // Never bootstrap a different visitor and attach an existing proof to it.
         client.set_po_tokens(po_tokens)?;
         if client.config.client_version.is_none() {
             let html = client.music_page("/")?;

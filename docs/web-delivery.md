@@ -51,6 +51,50 @@ bounded provider cleans itself up. Native network and SABR reads retain actual
 I/O cancellation. Browser availability and Google protocol changes remain external
 requirements; no third-party token service is used.
 
+## Anonymous host-provided attestation
+
+Version 0.9.1 adds `anonymous_attestation_context` without changing JSON protocol
+2.0 or C ABI 2. Check `capabilities.features.anonymous_po_tokens` before using it.
+The existing `attestation_context` operation and signed-in browser helper keep
+requiring the imported signing session; neither silently becomes anonymous.
+
+A persistent anonymous client can request:
+
+```json
+{"op":"anonymous_attestation_context","video_id":"QoXDQa9L12A"}
+```
+
+The secret response contains `video_id`, `client` (`WEB_REMIX`),
+`client_version`, the exact `visitor_data` used in its Music requests,
+`binding_kind` (`anonymous_visitor_v1`), `session_binding` and `max_expires_at`.
+Do not log or persist this descriptor. The operation rejects any client with a
+Cookie value, including malformed or expired cookies, and rejects account
+selectors or missing visitor data. An anonymous client never needs fake cookies.
+
+The host obtains real attestation through its chosen provider, then supplies the
+existing `set_po_tokens` bundle shape. A GVS-only bundle is supported: set
+`player_token` to null and supply `gvs_token`, the requested `video_id`, a bounded
+`expires_at`, and the descriptor's `session_binding`. Keep tokens in memory and
+honor the existing 30-second expiry margin and one-hour maximum. Replacing tokens
+invalidates the playback cache; SABR reads still recheck current proof.
+
+The visitor fingerprint is a domain-separated, length-framed SHA-256 ownership
+guard, not Google's token minting identifier or a cryptographic validation of the
+proof. The provider must follow the official protocol: GVS may bind to a video
+under the content-proof experiment. The core does not claim that such a token is
+cryptographically bound to visitor data. Signed-in fingerprints continue to use
+the signing session and selected account, with no downgrade to visitor identity.
+
+When passing anonymous bundles through `Config.po_tokens` at construction time,
+explicitly supply the exact matching `visitor_data`. Validation precedes network
+bootstrap, so the core cannot silently adopt a different visitor for an existing
+proof. Alternatively, create the client normally, read its anonymous descriptor,
+and then install freshly generated proof.
+
+This change does not embed a BotGuard VM or require a particular host runtime.
+A short CDN probe is still not a guarantee of complete playback; validate larger
+ranges or the full track after installing proof.
+
 ## Native SABR audio
 
 The core implements audio-only VOD SABR requests and UMP/protobuf parsing in Rust.

@@ -35,6 +35,9 @@ pub enum Request {
     AttestationContext {
         video_id: String,
     },
+    AnonymousAttestationContext {
+        video_id: String,
+    },
     SabrOpen {
         video_id: String,
         #[serde(default)]
@@ -185,9 +188,9 @@ impl Request {
                 }
                 tokens.iter().try_for_each(|token| token.validate())
             }
-            Self::SabrOpen { video_id, .. } | Self::AttestationContext { video_id } => {
-                client::validate_video_id(video_id)
-            }
+            Self::SabrOpen { video_id, .. }
+            | Self::AttestationContext { video_id }
+            | Self::AnonymousAttestationContext { video_id } => client::validate_video_id(video_id),
             Self::SabrRead { handle }
             | Self::SabrSeek { handle, .. }
             | Self::SabrClose { handle } => {
@@ -275,6 +278,9 @@ impl MusicClient {
                 Ok(json!({"updated":true}))
             }
             Request::AttestationContext { video_id } => Ok(self.attestation_context(&video_id)?),
+            Request::AnonymousAttestationContext { video_id } => {
+                Ok(self.anonymous_attestation_context(&video_id)?)
+            }
             Request::SabrOpen { video_id, format } => {
                 serde_json::to_value(self.sabr_open(&video_id, format)?)
             }
@@ -442,8 +448,8 @@ pub fn core_call(input: &str) -> String {
 pub fn capabilities() -> Value {
     json!({"protocol_version":"2.0", "abi_version":2, "core_version":env!("CARGO_PKG_VERSION"),
         "client":"WEB_REMIX", "authentication":"browser_cookie",
-        "features":{"cancellation":true,"operation_deadline":true,"progress":true,"read_retries":true,"prewarm":true,"stream_cache":true,"stream_refresh":true,"dash_manifest":true,"po_tokens":true,"po_token_generation":"official_browser","sabr_audio":true,"library_writes":true,"account_selection":true,"timed_lyrics":"when_provided_by_web"},
-        "operations":["capabilities","attestation_context","set_po_tokens","sabr_open","sabr_read","sabr_seek","sabr_close","auth_status","auth_refresh","account","accounts","library","search","search_suggestions","home","explore","browse","playlist","continue","song","player","stream","stream_refresh","dash_manifest","prewarm","prefetch","playback_reset","queue","queue_context","lyrics","timed_lyrics","rate_song","rate_playlist","edit_library","subscribe","create_playlist","edit_playlist","delete_playlist","add_playlist_items","remove_playlist_items","move_playlist_item"],
+        "features":{"cancellation":true,"operation_deadline":true,"progress":true,"read_retries":true,"prewarm":true,"stream_cache":true,"stream_refresh":true,"dash_manifest":true,"po_tokens":true,"anonymous_po_tokens":true,"po_token_generation":"official_browser","sabr_audio":true,"library_writes":true,"account_selection":true,"timed_lyrics":"when_provided_by_web"},
+        "operations":["capabilities","attestation_context","anonymous_attestation_context","set_po_tokens","sabr_open","sabr_read","sabr_seek","sabr_close","auth_status","auth_refresh","account","accounts","library","search","search_suggestions","home","explore","browse","playlist","continue","song","player","stream","stream_refresh","dash_manifest","prewarm","prefetch","playback_reset","queue","queue_context","lyrics","timed_lyrics","rate_song","rate_playlist","edit_library","subscribe","create_playlist","edit_playlist","delete_playlist","add_playlist_items","remove_playlist_items","move_playlist_item"],
         "limits":{"prefetch_tracks":3,"operation_timeout_ms_max":600000,"native_clients":128,"native_operations":256,"sabr_sessions_per_client":4,"po_token_bundles":16},
         "unsupported":["native_botguard_runtime","live_sabr"]})
 }

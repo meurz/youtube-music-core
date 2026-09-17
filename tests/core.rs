@@ -246,3 +246,25 @@ fn removed_playback_route_is_rejected_and_not_advertised() {
     assert_eq!(capabilities["features"]["po_tokens"], true);
     assert_eq!(capabilities["features"]["sabr_audio"], true);
 }
+
+#[test]
+fn anonymous_attestation_context_is_an_additive_protocol_operation() {
+    let output = core_call(
+        &json!({
+            "config":{"client_version":"offline.fixture","visitor_data":"visitor-fixture"},
+            "request":{"op":"anonymous_attestation_context","video_id":"QoXDQa9L12A"}
+        })
+        .to_string(),
+    );
+    let result: Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(result["ok"], true);
+    assert_eq!(result["data"]["visitor_data"], "visitor-fixture");
+    let caps = youtube_music_core::capabilities();
+    assert_eq!(caps["protocol_version"], "2.0");
+    assert_eq!(caps["abi_version"], 2);
+    assert_eq!(caps["features"]["anonymous_po_tokens"], true);
+    assert!(caps["operations"]
+        .as_array()
+        .unwrap()
+        .contains(&json!("anonymous_attestation_context")));
+}

@@ -1,7 +1,8 @@
-//! Optional official-browser Proof of Origin tokens, bound to one video and session.
+//! Proof of Origin tokens bound to one video and an authenticated or anonymous client.
 //!
-//! Token generation needs a real, signed-in official Music page. The embedded
-//! player-transform sandbox is deliberately not presented as a BotGuard runtime.
+//! The built-in browser provider needs a signed-in official Music page. Hosts may
+//! separately provide anonymous tokens; the embedded player-transform sandbox
+//! is deliberately not presented as a BotGuard runtime.
 use crate::{Error, Result};
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -26,7 +27,8 @@ pub struct PoTokenBundle {
     pub player_token: Option<String>,
     pub gvs_token: Option<String>,
     pub expires_at: u64,
-    /// Hash of the signing session and account selection, never a raw cookie.
+    /// Domain-separated hash of the signing session/account or anonymous visitor.
+    /// This local ownership guard is not a claim about the Google token binding.
     pub session_binding: String,
 }
 
@@ -129,6 +131,25 @@ pub fn session_binding(
     Ok(format!("{:x}", hash.finalize()))
 }
 
+/// Anonymous ownership guard for the exact visitor data sent by this client.
+/// This fingerprint is correlation data, not the token minting identifier.
+/// Hosts must never log either the input or the returned value.
+pub fn visitor_binding(visitor_data: &str) -> Result<String> {
+    if visitor_data.is_empty()
+        || visitor_data.len() > 4096
+        || !visitor_data.bytes().all(|byte| byte.is_ascii_graphic())
+    {
+        return Err(invalid("invalid anonymous visitor data"));
+    }
+    let mut hash = Sha256::new();
+    hash.update(b"youtube-music-core/po-visitor/v1\0");
+    for part in [b"WEB_REMIX".as_slice(), visitor_data.as_bytes()] {
+        hash.update((part.len() as u64).to_be_bytes());
+        hash.update(part);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
+
 fn invalid(message: &str) -> Error {
     Error::InvalidInput(message.into())
 }
@@ -208,6 +229,23 @@ mod tests {
         assert!(session_binding("SAPISID=one; SAPISID=two", 0, None).is_err());
         assert!(!format!("{:?}", bundle()).contains("pppp"));
     }
+    #[test]
+    fn visitor_binding_is_exact_bounded_and_domain_separated() {
+        let binding = visitor_binding("visitor-A%3D").unwrap();
+        assert_eq!(binding.len(), 64);
+        assert_eq!(binding, visitor_binding("visitor-A%3D").unwrap());
+        assert_ne!(binding, visitor_binding("visitor-A=").unwrap());
+        assert_ne!(binding, visitor_binding("visitor-B%3D").unwrap());
+        assert_ne!(
+            binding,
+            session_binding("SAPISID=visitor-A%3D", 0, None).unwrap()
+        );
+        for invalid in ["", "visitor data", "visitor\r\nheader", "non-ascii-訪客"] {
+            assert!(visitor_binding(invalid).is_err());
+        }
+        assert!(visitor_binding(&"a".repeat(4097)).is_err());
+    }
+
     #[test]
     fn malformed_tokens_and_script_arguments_are_rejected() {
         let mut b = bundle();
