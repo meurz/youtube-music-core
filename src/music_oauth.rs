@@ -1,7 +1,6 @@
-//! Experimental authorization-code + PKCE flow using a candidate Music iOS client.
-//! The identifier was recovered from a modified IPA; its original provenance and
-//! compatibility with Android Music are not verified. Google displays an
-//! unverified-app warning. This flow is not used by the released CLI login.
+//! Experimental authorization-code + PKCE primitives with no default OAuth client.
+//! No compatible official client with a verified consent flow has been established.
+//! This flow is not used by the released CLI login.
 //! This module does not open a browser, register URI handlers, or store credentials.
 use crate::{client::network, Config, Error, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -15,10 +14,6 @@ use std::{
 };
 use zeroize::Zeroizing;
 
-// Public identifier from GoogleService-Info.plist in the investigated IPA.
-// This candidate uses PKCE without a client secret. See the protocol investigation.
-pub const CLIENT_ID: &str =
-    "755973059757-ipk9n6laup0pc9a4i8gmdqmj4bqt9noj.apps.googleusercontent.com";
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const SCOPE: &str =
@@ -95,6 +90,7 @@ pub struct MusicAuthorization {
     pub state: String,
     verifier: Zeroizing<String>,
     redirect_uri: String,
+    client_id: String,
     deadline: u64,
 }
 
@@ -129,21 +125,29 @@ impl MusicAuthClient {
         })
     }
 
-    pub fn begin(&self) -> Result<MusicAuthorization> {
+    /// The host must first verify the client identity, allowed scopes and Music
+    /// compatibility. Syntactic validation here does not verify Google's consent status.
+    pub fn begin(&self, client_id: &str) -> Result<MusicAuthorization> {
+        let stem = client_id
+            .strip_suffix(".apps.googleusercontent.com")
+            .filter(|s| {
+                !s.is_empty()
+                    && s.len() <= 256
+                    && s.bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            })
+            .ok_or_else(|| Error::InvalidInput("invalid Music OAuth client ID".into()))?;
         let mut random = [0u8; 80];
         getrandom::fill(&mut random)
             .map_err(|_| Error::OAuth("secure randomness unavailable".into()))?;
         let verifier = Zeroizing::new(URL_SAFE_NO_PAD.encode(&random[..48]));
         let state = URL_SAFE_NO_PAD.encode(&random[48..]);
-        let callback_scheme = format!(
-            "com.googleusercontent.apps.{}",
-            CLIENT_ID.trim_end_matches(".apps.googleusercontent.com")
-        );
+        let callback_scheme = format!("com.googleusercontent.apps.{}", stem);
         let redirect_uri = format!("{callback_scheme}:/oauth2redirect");
         let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
         let mut url = Url::parse(AUTH_URL).expect("constant URL");
         url.query_pairs_mut().extend_pairs([
-            ("client_id", CLIENT_ID),
+            ("client_id", client_id),
             ("redirect_uri", redirect_uri.as_str()),
             ("response_type", "code"),
             ("scope", SCOPE),
@@ -159,6 +163,7 @@ impl MusicAuthClient {
             state,
             verifier,
             redirect_uri,
+            client_id: client_id.into(),
             deadline: now()?.saturating_add(1800),
         })
     }
@@ -176,14 +181,14 @@ impl MusicAuthClient {
         let data = token_request(
             &self.http,
             &[
-                ("client_id", CLIENT_ID),
+                ("client_id", auth.client_id.as_str()),
                 ("code", code.as_str()),
                 ("redirect_uri", auth.redirect_uri.as_str()),
                 ("code_verifier", auth.verifier.as_str()),
                 ("grant_type", "authorization_code"),
             ],
         )?;
-        parse_token(&data, CLIENT_ID, None)
+        parse_token(&data, &auth.client_id, None)
     }
 }
 
@@ -285,6 +290,7 @@ fn parse_token(v: &Value, client_id: &str, old_refresh: Option<&str>) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    const CLIENT_ID: &str = "123-synthetic.apps.googleusercontent.com";
     use serde_json::json;
     #[test]
     fn callback_rejects_csrf_duplicate_fields_and_wrong_destinations() {
@@ -311,8 +317,9 @@ mod tests {
     #[test]
     fn pkce_and_state_are_unique_and_verifier_is_not_in_the_authorization_url() {
         let client = MusicAuthClient::new(&Config::default()).unwrap();
-        let a = client.begin().unwrap();
-        let b = client.begin().unwrap();
+        let a = client.begin(CLIENT_ID).unwrap();
+        let b = client.begin(CLIENT_ID).unwrap();
+        assert!(client.begin("invalid:/client").is_err());
         assert_ne!(a.state, b.state);
         assert!(!a.authorization_url.contains(a.verifier.as_str()));
         let u = Url::parse(&a.authorization_url).unwrap();
@@ -323,6 +330,7 @@ mod tests {
             URL_SAFE_NO_PAD.encode(Sha256::digest(a.verifier.as_bytes()))
         );
         assert_eq!(p["code_challenge_method"], "S256");
+        assert_eq!(p["client_id"], CLIENT_ID);
         assert!(!format!("{a:?}").contains(a.verifier.as_str()));
     }
     #[test]

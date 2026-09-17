@@ -2,7 +2,7 @@
 
 Status: migration blocked on link-based authentication, not released. Observed on 2026-09-17.
 
-The intended migration uses Android Music for every API operation and retains sign-in through an official Google authorization link. Importing an Android phone's credentials is not an accepted sign-in method for this migration. The released 0.4.0 behavior has not been changed.
+The intended migration uses Android Music for every API operation and retains sign-in through an official Google authorization link **without an unverified-app warning**. Importing an Android phone's credentials or proceeding past that warning is not an accepted sign-in method for this migration. The released 0.4.0 behavior has not been changed.
 
 ## Evidence source
 
@@ -49,11 +49,13 @@ The existing TV grant was not replaced. These probes establish failures for the 
 - The OAuth Account Manager `v1/issuetoken` endpoint rejected the existing TV refresh token with HTTP 401 and the TV access token with HTTP 403. No TV-to-Music token conversion was demonstrated.
 - Static inspection of the modified **YTMusicUltimate 2.3.1 IPA**, containing Music 6.51.1, found a candidate public client in `GoogleService-Info.plist`. The IPA was not executed or installed. Its modified provenance means the recovered identifiers cannot all be assumed to be original Google configurations.
 - That candidate accepts an authorization-code URL with PKCE and a reverse-client-ID URI callback far enough to display Google's login/consent pages. The user then reported **“Google hasn't verified this app”**, showing developer `yt-woodstock-eng@google.com`. The displayed email is recorded evidence, not sufficient verification of the client or this use of it.
-- The user has not yet confirmed continuing past that warning. No callback, code exchange, refresh token, Android library compatibility, or independent refresh has been verified for this candidate. Opening the authorization page is not evidence that the entire flow works.
+- The user explicitly accepts only an entry without that warning. This candidate was therefore retired: the pending attempt was invalidated, the temporary Windows URI handler removed, and the built-in candidate ID removed from the experimental Rust module. No callback, code exchange, refresh token, Android library compatibility, or independent refresh was verified for it. Opening the authorization page is not evidence that the entire flow works.
+- A further static inspection found an `:/authCallback` URI template. Four additional authorization probes using that path, the two other native account client IDs, and bundle/client-based SSO schemes all reached Google's error page with `invalid_request` and “Custom scheme URI” markers. HTTP 200 on that HTML error page is not successful authorization.
 
 The branch now contains experimental Rust PKCE/session handling, Android transport,
 renderer normalization, and playback routing for an explicitly configured native
-session. `auth login` still uses the released TV device flow; there is no production
+session. The PKCE primitives have no default client and cannot establish a client's
+verification status from its identifier. `auth login` still uses the released TV device flow; there is no production
 native callback handler yet. Anonymous and legacy profiles retain their existing
 routes, so this is not a completed Android-only migration. The experimental modules
 must not be presented as a verified official login or released as the completed

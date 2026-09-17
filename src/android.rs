@@ -148,7 +148,7 @@ mod tests {
             access_token: "synthetic-native-access".into(),
             refresh_token: "synthetic-native-refresh".into(),
             expires_at: u64::MAX,
-            client_id: crate::music_oauth::CLIENT_ID.into(),
+            client_id: "123-synthetic.apps.googleusercontent.com".into(),
         };
         let config = crate::Config {
             music_oauth: Some(session.clone()),
