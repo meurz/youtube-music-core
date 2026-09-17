@@ -30,6 +30,184 @@ fn client(handle: u64) -> Result<Arc<MusicClient>> {
         .ok_or_else(|| Error::InvalidInput("invalid or destroyed client handle".into()))
 }
 
+fn register_client(value: MusicClient) -> Result<Value> {
+    let mut registry = clients()
+        .lock()
+        .map_err(|_| Error::Protocol("client registry unavailable".into()))?;
+    if registry.clients.len() >= 128 {
+        return Err(Error::InvalidInput(
+            "too many live clients; destroy unused handles".into(),
+        ));
+    }
+    let handle = registry
+        .last_handle
+        .checked_add(1)
+        .ok_or_else(|| Error::Protocol("client handles exhausted".into()))?;
+    registry.last_handle = handle;
+    registry.clients.insert(handle, Arc::new(value));
+    Ok(json!({"handle": handle}))
+}
+
+struct Operation {
+    context: crate::operation::OperationContext,
+    state: std::sync::atomic::AtomicU8,
+}
+#[derive(Default)]
+struct Operations {
+    last: u64,
+    values: HashMap<u64, Arc<Operation>>,
+}
+fn operations() -> &'static Mutex<Operations> {
+    static OPERATIONS: OnceLock<Mutex<Operations>> = OnceLock::new();
+    OPERATIONS.get_or_init(Mutex::default)
+}
+fn operation(id: u64) -> Result<Arc<Operation>> {
+    operations()
+        .lock()
+        .map_err(|_| Error::Protocol("operation registry unavailable".into()))?
+        .values
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| Error::InvalidInput("invalid or destroyed operation handle".into()))
+}
+fn controlled<T>(id: u64, call: impl FnOnce() -> Result<T>) -> Result<T> {
+    use std::sync::atomic::Ordering;
+    let op = operation(id)?;
+    op.state
+        .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
+        .map_err(|_| Error::InvalidInput("operation handles are single-use".into()))?;
+    struct Finish(Arc<Operation>);
+    impl Drop for Finish {
+        fn drop(&mut self) {
+            self.0.context.set_phase("finished");
+            self.0.state.store(2, Ordering::Release);
+        }
+    }
+    let _finish = Finish(op.clone());
+    op.context.run(call)
+}
+
+/// Allocate a single-use operation before starting a blocking call. Options: {"timeout_ms":120000}.
+/// # Safety
+/// options must point to a valid NUL-terminated UTF-8 string for this call, or be null.
+#[no_mangle]
+pub unsafe extern "C" fn ytmusic_operation_create(options: *const c_char) -> *mut c_char {
+    output(|| {
+        // SAFETY: input validity is the caller's contract.
+        let options = serde_json::from_str(unsafe { input(options)? })
+            .map_err(|_| Error::InvalidInput("expected operation options JSON".into()))?;
+        let context = crate::operation::OperationContext::new(options)?;
+        let mut registry = operations()
+            .lock()
+            .map_err(|_| Error::Protocol("operation registry unavailable".into()))?;
+        if registry.values.len() >= 256 {
+            return Err(Error::InvalidInput(
+                "too many live operations; destroy unused handles".into(),
+            ));
+        }
+        let handle = registry
+            .last
+            .checked_add(1)
+            .ok_or_else(|| Error::Protocol("operation handles exhausted".into()))?;
+        registry.last = handle;
+        registry.values.insert(
+            handle,
+            Arc::new(Operation {
+                context,
+                state: std::sync::atomic::AtomicU8::new(0),
+            }),
+        );
+        Ok(json!({"handle":handle}))
+    })
+}
+/// Signal cancellation. Running HTTP futures and JS execution observe this signal.
+#[no_mangle]
+pub extern "C" fn ytmusic_operation_cancel(handle: u64) -> *mut c_char {
+    output(|| {
+        operation(handle)?.context.cancel();
+        Ok(json!({"cancelled":true}))
+    })
+}
+/// Read non-secret progress without blocking the client operation.
+#[no_mangle]
+pub extern "C" fn ytmusic_operation_status(handle: u64) -> *mut c_char {
+    output(|| {
+        let op = operation(handle)?;
+        let mut progress = serde_json::to_value(op.context.progress())
+            .map_err(|_| Error::Protocol("progress serialization failed".into()))?;
+        progress["state"] = match op.state.load(std::sync::atomic::Ordering::Acquire) {
+            0 => "queued",
+            1 => "running",
+            _ => "finished",
+        }
+        .into();
+        Ok(progress)
+    })
+}
+/// Remove the operation handle and cancel any call that still owns it.
+#[no_mangle]
+pub extern "C" fn ytmusic_operation_destroy(handle: u64) -> *mut c_char {
+    output(|| {
+        let removed = operations()
+            .lock()
+            .map_err(|_| Error::Protocol("operation registry unavailable".into()))?
+            .values
+            .remove(&handle)
+            .ok_or_else(|| Error::InvalidInput("invalid or destroyed operation handle".into()))?;
+        removed.context.cancel();
+        Ok(json!({"destroyed":true}))
+    })
+}
+
+/// Create a client with cancellable bootstrap and a whole-operation deadline.
+/// # Safety
+/// config must point to a valid NUL-terminated UTF-8 string for this call, or be null.
+#[no_mangle]
+pub unsafe extern "C" fn ytmusic_client_create_with_operation(
+    config: *const c_char,
+    operation_id: u64,
+) -> *mut c_char {
+    output(|| {
+        controlled(operation_id, || {
+            // SAFETY: input validity is the caller's contract.
+            let config: Config = serde_json::from_str(unsafe { input(config)? })
+                .map_err(|_| Error::InvalidInput("expected client configuration JSON".into()))?;
+            register_client(MusicClient::new(config)?)
+        })
+    })
+}
+/// Execute with a previously allocated, single-use operation handle.
+/// # Safety
+/// request must point to a valid NUL-terminated UTF-8 string for this call, or be null.
+#[no_mangle]
+pub unsafe extern "C" fn ytmusic_client_call_with_operation(
+    handle: u64,
+    request: *const c_char,
+    operation_id: u64,
+) -> *mut c_char {
+    output(|| {
+        controlled(operation_id, || {
+            // SAFETY: input validity is the caller's contract.
+            let request: Request = serde_json::from_str(unsafe { input(request)? })
+                .map_err(|_| Error::InvalidInput("expected request JSON with op".into()))?;
+            client(handle)?.execute(request)
+        })
+    })
+}
+/// Explicit secret export with cancellable account verification.
+#[no_mangle]
+pub extern "C" fn ytmusic_client_export_session_with_operation(
+    handle: u64,
+    operation_id: u64,
+) -> *mut c_char {
+    output(|| {
+        controlled(operation_id, || {
+            serde_json::to_value(client(handle)?.browser_session()?)
+                .map_err(|_| Error::Protocol("session serialization failed".into()))
+        })
+    })
+}
+
 fn output(call: impl FnOnce() -> Result<Value>) -> *mut c_char {
     raw_output(|| crate::envelope(call()).to_string())
 }
@@ -91,17 +269,7 @@ pub unsafe extern "C" fn ytmusic_client_create(config: *const c_char) -> *mut c_
                 },
             )
         })?;
-        let client = Arc::new(MusicClient::new(config)?);
-        let mut registry = clients()
-            .lock()
-            .map_err(|_| Error::Protocol("client registry unavailable".into()))?;
-        let handle = registry
-            .last_handle
-            .checked_add(1)
-            .ok_or_else(|| Error::Protocol("client handles exhausted".into()))?;
-        registry.last_handle = handle;
-        registry.clients.insert(handle, client);
-        Ok(json!({"handle": handle}))
+        register_client(MusicClient::new(config)?)
     })
 }
 
@@ -149,6 +317,36 @@ pub extern "C" fn ytmusic_client_destroy(handle: u64) -> *mut c_char {
     })
 }
 
+/// Create a new verified account client. The original handle remains unchanged.
+/// # Safety
+/// selector must point to a valid NUL-terminated UTF-8 JSON object or be null.
+#[no_mangle]
+pub unsafe extern "C" fn ytmusic_client_select_account(
+    handle: u64,
+    selector: *const c_char,
+    operation_id: u64,
+) -> *mut c_char {
+    output(|| {
+        controlled(operation_id, || {
+            // SAFETY: input validity is the caller's contract.
+            let selector: crate::discovery::AccountSelector =
+                serde_json::from_str(unsafe { input(selector)? })
+                    .map_err(|_| Error::InvalidInput("expected account selector JSON".into()))?;
+            register_client(client(handle)?.select_account(&selector)?)
+        })
+    })
+}
+/// Local protocol/capability discovery; does not create a client or use the network.
+#[no_mangle]
+pub extern "C" fn ytmusic_capabilities() -> *mut c_char {
+    output(|| Ok(crate::capabilities()))
+}
+/// C ABI revision. Existing v1 entry points remain available.
+#[no_mangle]
+pub extern "C" fn ytmusic_abi_version() -> u32 {
+    2
+}
+
 /// Release a returned JSON string; null is accepted. Clears the allocation first.
 ///
 /// # Safety
@@ -181,6 +379,45 @@ mod tests {
         let value = read(unsafe { ytmusic_client_create(config.as_ptr()) });
         assert_eq!(value["ok"], true);
         value["data"]["handle"].as_u64().unwrap()
+    }
+
+    #[test]
+    fn operation_handles_are_single_use_and_cancellation_prevents_execution() {
+        let options = CString::new("{}").unwrap();
+        let request = CString::new(r#"{"op":"auth_status"}"#).unwrap();
+        let handle = create();
+        // SAFETY: strings remain alive for each call.
+        let op = read(unsafe { ytmusic_operation_create(options.as_ptr()) })["data"]["handle"]
+            .as_u64()
+            .unwrap();
+        assert_eq!(read(ytmusic_operation_cancel(op))["ok"], true);
+        // SAFETY: request is a valid NUL-terminated string.
+        assert_eq!(
+            read(unsafe { ytmusic_client_call_with_operation(handle, request.as_ptr(), op) })
+                ["error"]["code"],
+            "cancelled"
+        );
+        assert_eq!(
+            read(ytmusic_operation_status(op))["data"]["state"],
+            "finished"
+        );
+        // SAFETY: request remains live; repeated operations must be rejected.
+        assert_eq!(
+            read(unsafe { ytmusic_client_call_with_operation(handle, request.as_ptr(), op) })
+                ["error"]["code"],
+            "invalid_input"
+        );
+        assert_eq!(read(ytmusic_operation_destroy(op))["ok"], true);
+        assert_eq!(
+            read(ytmusic_operation_cancel(op))["error"]["code"],
+            "invalid_input"
+        );
+        assert_eq!(read(ytmusic_client_destroy(handle))["ok"], true);
+        assert_eq!(ytmusic_abi_version(), 2);
+        assert_eq!(
+            read(ytmusic_capabilities())["data"]["protocol_version"],
+            "1.1"
+        );
     }
 
     #[test]

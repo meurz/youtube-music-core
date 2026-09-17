@@ -284,7 +284,7 @@ fn parse_timed(value: &Value, browse_id: &str) -> Result<TimedLyrics> {
                 let start_ms = number(&line["cueRange"]["startTimeMilliseconds"])?;
                 let end_ms = number(&line["cueRange"]["endTimeMilliseconds"])?;
                 let text = line["lyricLine"].as_str()?.to_owned();
-                (end_ms >= start_ms).then(|| LyricLine {
+                (end_ms >= start_ms).then_some(LyricLine {
                     text,
                     start_ms,
                     end_ms,
@@ -369,7 +369,12 @@ fn parse_accounts(value: &Value, current: &AccountInfo) -> Result<Vec<AccountCho
             } else {
                 None
             }
-            .filter(|selector| selector.validate().is_ok());
+            .filter(|selector| {
+                selector.validate().is_ok()
+                    && ((selector.auth_user == current.auth_user
+                        && selector.delegated_session_id == current.delegated_session_id)
+                        || selector.expected_channel_handle.is_some())
+            });
             let thumbnails = account["accountPhoto"]["thumbnails"]
                 .as_array()
                 .into_iter()
@@ -600,7 +605,7 @@ mod tests {
             auth_user: 2,
             delegated_session_id: None,
         };
-        let v = json!({"contents":[{"accountItem":{"accountName":{"simpleText":"Current"},"isSelected":true,"channelHandle":{"simpleText":"@current"}}},{"accountItem":{"accountName":{"simpleText":"Other"},"serviceEndpoint":{"selectActiveIdentityEndpoint":{"supportedTokens":[{"accountStateToken":{"obfuscatedGaiaId":"not-a-session-id"}}]}}}},{"accountItem":{"accountName":{"simpleText":"Brand"},"serviceEndpoint":{"delegatedSessionId":"brand-session"}}},{"accountItem":{"accountName":{"simpleText":"Disabled"},"isSelected":true,"isDisabled":true}}]});
+        let v = json!({"contents":[{"accountItem":{"accountName":{"simpleText":"Current"},"isSelected":true,"channelHandle":{"simpleText":"@current"}}},{"accountItem":{"accountName":{"simpleText":"Other"},"serviceEndpoint":{"selectActiveIdentityEndpoint":{"supportedTokens":[{"accountStateToken":{"obfuscatedGaiaId":"not-a-session-id"}}]}}}},{"accountItem":{"accountName":{"simpleText":"Brand"},"channelHandle":{"simpleText":"@brand"},"serviceEndpoint":{"delegatedSessionId":"brand-session"}}},{"accountItem":{"accountName":{"simpleText":"Disabled"},"isSelected":true,"isDisabled":true}}]});
         let p = parse_accounts(&v, &current).unwrap();
         assert_eq!(p[0].selector.as_ref().unwrap().auth_user, 2);
         assert!(p[1].selector.is_none());
@@ -613,6 +618,10 @@ mod tests {
             Some("brand-session")
         );
         assert!(p[3].selector.is_none());
+        let unidentified = json!({"accountItem":{"accountName":{"simpleText":"Brand"},"serviceEndpoint":{"delegatedSessionId":"another-brand"}}});
+        assert!(parse_accounts(&unidentified, &current).unwrap()[0]
+            .selector
+            .is_none());
         assert!(parse_accounts(&json!({"responseContext":{"loggedOut":true}}), &current).is_err());
     }
 }

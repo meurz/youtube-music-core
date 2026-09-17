@@ -33,25 +33,27 @@ impl MusicClient {
     /// Includes both owned and saved playlists. Each call verifies the account,
     /// so a rejected session cannot become an apparently empty library.
     pub fn library(&self, section: LibrarySection, continuation: Option<&str>) -> Result<Page> {
-        if let Some(token) = continuation {
-            nonempty(token, "continuation")?;
-        }
-        self.account()?;
-        let mut body = json!({"browseId":section.browse_id()});
-        if let Some(token) = continuation {
-            body["continuation"] = token.into();
-        }
-        let value = self.post("browse", body).map_err(|e| {
-            if matches!(e, Error::Http(401) | Error::Http(403)) {
-                Error::AuthenticationRejected
-            } else {
-                e
+        crate::operation::ensure(|| {
+            if let Some(token) = continuation {
+                nonempty(token, "continuation")?;
             }
-        })?;
-        if explicitly_signed_out(&value) {
-            return Err(Error::AuthenticationRejected);
-        }
-        parse_library_page(&value)
+            self.account()?;
+            let mut body = json!({"browseId":section.browse_id()});
+            if let Some(token) = continuation {
+                body["continuation"] = token.into();
+            }
+            let value = self.post("browse", body).map_err(|e| {
+                if matches!(e, Error::Http(401) | Error::Http(403)) {
+                    Error::AuthenticationRejected
+                } else {
+                    e
+                }
+            })?;
+            if explicitly_signed_out(&value) {
+                return Err(Error::AuthenticationRejected);
+            }
+            parse_library_page(&value)
+        })
     }
 }
 

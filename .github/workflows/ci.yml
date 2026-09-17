@@ -33,6 +33,13 @@ jobs:
       - name: Build Windows release candidate
         if: runner.os == 'Windows'
         run: cargo build --release --locked
+      - name: Exercise .NET native cancellation and lifecycle
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          dotnet build examples/dotnet-smoke --configuration Release
+          Copy-Item target/release/youtube_music_core.dll examples/dotnet-smoke/bin/Release/net8.0/
+          dotnet examples/dotnet-smoke/bin/Release/net8.0/InteropSmoke.dll
       - uses: actions/upload-artifact@v4
         if: runner.os == 'Windows'
         with:

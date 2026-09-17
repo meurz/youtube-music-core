@@ -2,6 +2,14 @@ use serde::Serialize;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("write outcome is unknown; read the current state before retrying")]
+    MutationUncertain(Box<Error>),
+    #[error("operation cancelled")]
+    Cancelled,
+    #[error("operation timed out")]
+    Timeout,
+    #[error("YouTube rate limit reached")]
+    RateLimited { retry_after_seconds: Option<u64> },
     #[error("invalid request: {0}")]
     InvalidInput(String),
     #[error("network request failed: {0}")]
@@ -34,11 +42,22 @@ pub enum Error {
 pub struct ErrorInfo {
     pub code: &'static str,
     pub message: String,
+    pub retryable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cause_code: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_status: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_seconds: Option<u64>,
 }
 
 impl Error {
     pub fn info(&self) -> ErrorInfo {
         let code = match self {
+            Self::MutationUncertain(_) => "mutation_outcome_unknown",
+            Self::Cancelled => "cancelled",
+            Self::Timeout => "timeout",
+            Self::RateLimited { .. } => "rate_limited",
             Self::InvalidInput(_) => "invalid_input",
             Self::Network(_) => "network",
             Self::Http(_) => "http",
@@ -55,6 +74,30 @@ impl Error {
         ErrorInfo {
             code,
             message: self.to_string(),
+            cause_code: match self {
+                Self::MutationUncertain(error) => Some(error.info().code),
+                _ => None,
+            },
+            retryable: matches!(
+                self,
+                Self::Network(_)
+                    | Self::Timeout
+                    | Self::RateLimited { .. }
+                    | Self::Http(429 | 502 | 503 | 504)
+            ),
+            http_status: match self {
+                Self::MutationUncertain(error) => error.info().http_status,
+                Self::Http(status) => Some(*status),
+                Self::RateLimited { .. } => Some(429),
+                _ => None,
+            },
+            retry_after_seconds: match self {
+                Self::MutationUncertain(error) => error.info().retry_after_seconds,
+                Self::RateLimited {
+                    retry_after_seconds,
+                } => *retry_after_seconds,
+                _ => None,
+            },
         }
     }
 }

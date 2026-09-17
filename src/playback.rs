@@ -1018,13 +1018,15 @@ mod tests {
 
     #[test]
     fn invalidation_removes_signed_urls_and_advances_generation() {
-        let mut cache = PlaybackCache::default();
-        cache.script = Some(Arc::new(WebPlayerScript {
-            source: String::new(),
-            timestamp: 1,
-            loaded_at: Instant::now(),
-            generation: 0,
-        }));
+        let mut cache = PlaybackCache {
+            script: Some(Arc::new(WebPlayerScript {
+                source: String::new(),
+                timestamp: 1,
+                loaded_at: Instant::now(),
+                generation: 0,
+            })),
+            ..Default::default()
+        };
         cache.insert("test", AudioFormat::Any, player().audio_streams.remove(0));
         cache.invalidate();
         assert_eq!(cache.generation, 1);

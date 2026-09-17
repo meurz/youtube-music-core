@@ -1,7 +1,7 @@
 use crate::{model::*, parse, Error, Result};
 use reqwest::{
-    blocking::Client,
     header::{HeaderMap, HeaderValue},
+    Client,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -9,7 +9,7 @@ use sha1::{Digest, Sha1};
 use std::{
     collections::BTreeMap,
     io::Read,
-    sync::{Mutex, MutexGuard, OnceLock},
+    sync::{Mutex, MutexGuard},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -112,13 +112,13 @@ impl Default for Config {
 pub struct MusicClient {
     pub(crate) http: Client,
     pub(crate) config: Config,
-    pub(crate) web_player: OnceLock<crate::playback::WebPlayerScript>,
+    pub(crate) playback: Mutex<crate::playback::PlaybackCache>,
     pub(crate) session: Mutex<crate::session::CookieState>,
 }
 
 pub(crate) fn network(e: reqwest::Error) -> Error {
     // Strip URLs, which can include continuation tokens or proxy credentials.
-    Error::Network(e.without_url().to_string())
+    crate::transport::network(e)
 }
 
 pub(crate) fn header(headers: &mut HeaderMap, key: &'static str, value: &str) -> Result<()> {
@@ -170,10 +170,10 @@ pub(crate) fn config_string(html: &str, key: &str) -> Option<String> {
         .ok()
 }
 
-pub(crate) fn checked_response(response: reqwest::blocking::Response) -> Result<String> {
+pub(crate) fn checked_response(response: crate::transport::Response) -> Result<String> {
     let status = response.status();
     if !status.is_success() {
-        return Err(Error::Http(status.as_u16()));
+        return Err(crate::transport::status_error(&response));
     }
     let mut body = String::new();
     response
@@ -189,7 +189,11 @@ pub(crate) fn checked_response(response: reqwest::blocking::Response) -> Result<
 impl MusicClient {
     /// Blocking client. Async hosts should call it on a dedicated blocking worker.
     /// Unless client_version is supplied, bootstraps the current web client first.
-    pub fn new(mut config: Config) -> Result<Self> {
+    pub fn new(config: Config) -> Result<Self> {
+        crate::operation::ensure(|| Self::new_inner(config))
+    }
+
+    fn new_inner(mut config: Config) -> Result<Self> {
         if config.auth_user > 99 {
             return Err(Error::InvalidInput(
                 "auth_user must be between 0 and 99".into(),
@@ -229,7 +233,7 @@ impl MusicClient {
             http,
             config,
             session: Mutex::new(session),
-            web_player: OnceLock::new(),
+            playback: Mutex::default(),
         };
         if client.config.client_version.is_none() {
             let html = client.music_page("/")?;
@@ -242,10 +246,7 @@ impl MusicClient {
     }
 
     pub(crate) fn lock_session(&self) -> Result<MutexGuard<'_, crate::session::CookieState>> {
-        let mut state = self
-            .session
-            .lock()
-            .map_err(|_| Error::Protocol("session lock unavailable".into()))?;
+        let mut state = crate::operation::lock(&self.session)?;
         state.purge(crate::session::now()?);
         Ok(state)
     }
@@ -263,12 +264,12 @@ impl MusicClient {
         if let Some(cookie) = &state.cookie {
             header(&mut headers, "cookie", cookie)?;
         }
-        let response = self
-            .http
-            .get(url.clone())
-            .headers(headers)
-            .send()
-            .map_err(network)?;
+        let response = self.send(
+            self.http.get(url.clone()).headers(headers),
+            MAX_RESPONSE as usize,
+            false,
+            true,
+        )?;
         if matches!(response.status().as_u16(), 401 | 403) {
             state.verified = false;
         }
@@ -279,11 +280,7 @@ impl MusicClient {
     }
 
     #[cfg(test)]
-    fn web_request(
-        &self,
-        endpoint: &str,
-        body: Value,
-    ) -> Result<reqwest::blocking::RequestBuilder> {
+    fn web_request(&self, endpoint: &str, body: Value) -> Result<reqwest::RequestBuilder> {
         let state = self.lock_session()?;
         self.web_request_with_cookie(endpoint, body, state.cookie.as_deref())
     }
@@ -293,7 +290,7 @@ impl MusicClient {
         endpoint: &str,
         mut body: Value,
         cookie: Option<&str>,
-    ) -> Result<reqwest::blocking::RequestBuilder> {
+    ) -> Result<reqwest::RequestBuilder> {
         let mut client = json!({"clientName":"WEB_REMIX", "clientVersion":self.config.client_version, "hl":self.config.language, "gl":self.config.country});
         let mut headers = HeaderMap::new();
         header(&mut headers, "origin", ORIGIN)?;
@@ -338,6 +335,22 @@ impl MusicClient {
             .json(&body))
     }
 
+    pub(crate) fn send(
+        &self,
+        request: reqwest::RequestBuilder,
+        limit: usize,
+        truncate: bool,
+        retry: bool,
+    ) -> Result<crate::transport::Response> {
+        crate::transport::send(request, limit, truncate, retry)
+    }
+
+    pub(crate) fn post_write(&self, endpoint: &str, body: Value) -> Result<Value> {
+        crate::operation::check()?;
+        self.post_validated_policy(endpoint, body, false, false, Ok)
+            .map(|(value, _)| value)
+    }
+
     pub(crate) fn post(&self, endpoint: &str, body: Value) -> Result<Value> {
         self.post_validated(endpoint, body, false, Ok)
             .map(|(value, _)| value)
@@ -352,75 +365,107 @@ impl MusicClient {
         verify_session: bool,
         parse: impl FnOnce(Value) -> Result<T>,
     ) -> Result<(T, Option<crate::auth::BrowserSession>)> {
+        self.post_validated_policy(endpoint, body, verify_session, true, parse)
+    }
+
+    fn post_validated_policy<T>(
+        &self,
+        endpoint: &str,
+        body: Value,
+        verify_session: bool,
+        retry: bool,
+        parse: impl FnOnce(Value) -> Result<T>,
+    ) -> Result<(T, Option<crate::auth::BrowserSession>)> {
         let mut state = self.lock_session()?;
-        let response = self
-            .web_request_with_cookie(endpoint, body, state.cookie.as_deref())?
-            .send()
-            .map_err(network)?;
-        if matches!(response.status().as_u16(), 401 | 403) {
-            state.verified = false;
-        }
-        let url = response.url().clone();
-        let headers = response.headers().clone();
-        let value: Value = serde_json::from_str(&checked_response(response)?)
-            .map_err(|_| Error::Protocol("API returned invalid JSON".into()))?;
-        if state.cookie.is_some() && crate::auth::explicitly_signed_out(&value) {
-            state.verified = false;
-            return Err(Error::AuthenticationRejected);
-        }
-        if let Some(error) = value.get("error") {
-            return Err(Error::Protocol(match error["code"].as_u64() {
-                Some(code) => format!("API error {code}"),
-                None => "API returned an error".into(),
-            }));
-        }
-        let parsed = parse(value).inspect_err(|_| {
-            if verify_session {
+        let request = self.web_request_with_cookie(endpoint, body, state.cookie.as_deref())?;
+        crate::operation::check()?;
+        let result = (|| {
+            let response = self.send(request, MAX_RESPONSE as usize, false, retry)?;
+            if matches!(response.status().as_u16(), 401 | 403) {
                 state.verified = false;
             }
-        })?;
-        state.observe(&url, &headers, crate::session::now()?)?;
-        let snapshot = if verify_session {
-            let snapshot = state
-                .snapshot(&self.config)
-                .map_err(|_| Error::AuthenticationRejected)?;
-            state.verified = true;
-            snapshot
+            let url = response.url().clone();
+            let headers = response.headers().clone();
+            let value: Value = serde_json::from_str(&checked_response(response)?)
+                .map_err(|_| Error::Protocol("API returned invalid JSON".into()))?;
+            if state.cookie.is_some() && crate::auth::explicitly_signed_out(&value) {
+                state.verified = false;
+                return Err(Error::AuthenticationRejected);
+            }
+            if let Some(error) = value.get("error") {
+                return Err(Error::Protocol(match error["code"].as_u64() {
+                    Some(code) => format!("API error {code}"),
+                    None => "API returned an error".into(),
+                }));
+            }
+            let parsed = parse(value).inspect_err(|_| {
+                if verify_session {
+                    state.verified = false;
+                }
+            })?;
+            state.observe(&url, &headers, crate::session::now()?)?;
+            let snapshot = if verify_session {
+                let snapshot = state
+                    .snapshot(&self.config)
+                    .map_err(|_| Error::AuthenticationRejected)?;
+                state.verified = true;
+                snapshot
+            } else {
+                None
+            };
+            Ok((parsed, snapshot))
+        })();
+        if retry {
+            result
         } else {
-            None
-        };
-        Ok((parsed, snapshot))
+            result.map_err(|error| match error {
+                Error::Network(_)
+                | Error::Timeout
+                | Error::Cancelled
+                | Error::Protocol(_)
+                | Error::Http(500..=599) => Error::MutationUncertain(Box::new(error)),
+                other => other,
+            })
+        }
     }
 
     pub fn search(&self, query: &str, filter: SearchFilter) -> Result<Page> {
-        nonempty(query, "query")?;
-        let mut body = json!({"query":query});
-        if let Some(params) = filter.params() {
-            body["params"] = params.into();
-        }
-        let value = self.post("search", body)?;
-        parse::page(&value)
+        crate::operation::ensure(|| {
+            nonempty(query, "query")?;
+            let mut body = json!({"query":query});
+            if let Some(params) = filter.params() {
+                body["params"] = params.into();
+            }
+            let value = self.post("search", body)?;
+            parse::page(&value)
+        })
     }
 
     /// A browse ID can identify an album, artist, playlist, or home feed.
     pub fn browse(&self, browse_id: &str) -> Result<Page> {
-        nonempty(browse_id, "browse_id")?;
-        parse::page(&self.post("browse", json!({"browseId":browse_id}))?)
+        crate::operation::ensure(|| {
+            nonempty(browse_id, "browse_id")?;
+            parse::page(&self.post("browse", json!({"browseId":browse_id}))?)
+        })
     }
 
     pub fn playlist(&self, playlist_id: &str) -> Result<Page> {
-        nonempty(playlist_id, "playlist_id")?;
-        let id = if playlist_id.starts_with("VL") {
-            playlist_id.into()
-        } else {
-            format!("VL{playlist_id}")
-        };
-        self.browse(&id)
+        crate::operation::ensure(|| {
+            nonempty(playlist_id, "playlist_id")?;
+            let id = if playlist_id.starts_with("VL") {
+                playlist_id.into()
+            } else {
+                format!("VL{playlist_id}")
+            };
+            self.browse(&id)
+        })
     }
 
     pub fn continue_page(&self, endpoint: ContinuationEndpoint, token: &str) -> Result<Page> {
-        nonempty(token, "continuation")?;
-        parse::page(&self.post(endpoint.as_str(), json!({"continuation":token}))?)
+        crate::operation::ensure(|| {
+            nonempty(token, "continuation")?;
+            parse::page(&self.post(endpoint.as_str(), json!({"continuation":token}))?)
+        })
     }
 
     fn next_raw(&self, video_id: &str) -> Result<Value> {
@@ -432,47 +477,53 @@ impl MusicClient {
     }
 
     pub fn queue(&self, video_id: &str) -> Result<Page> {
-        let next = self.next_raw(video_id)?;
-        if let Some(endpoint) = parse::find(&next, "automixPreviewVideoRenderer")
-            .and_then(|v| parse::find(v, "watchPlaylistEndpoint"))
-        {
-            if let Some(playlist_id) = endpoint["playlistId"].as_str() {
-                let mut body = json!({"videoId":video_id, "playlistId":playlist_id, "isAudioOnly":true, "enablePersistentPlaylistPanel":true});
-                if let Some(params) = endpoint.get("params") {
-                    body["params"] = params.clone();
+        crate::operation::ensure(|| {
+            let next = self.next_raw(video_id)?;
+            if let Some(endpoint) = parse::find(&next, "automixPreviewVideoRenderer")
+                .and_then(|v| parse::find(v, "watchPlaylistEndpoint"))
+            {
+                if let Some(playlist_id) = endpoint["playlistId"].as_str() {
+                    let mut body = json!({"videoId":video_id, "playlistId":playlist_id, "isAudioOnly":true, "enablePersistentPlaylistPanel":true});
+                    if let Some(params) = endpoint.get("params") {
+                        body["params"] = params.clone();
+                    }
+                    return parse::page(&self.post("next", body)?);
                 }
-                return parse::page(&self.post("next", body)?);
             }
-        }
-        parse::page(&next)
+            parse::page(&next)
+        })
     }
 
     pub fn song(&self, video_id: &str) -> Result<Track> {
-        let p = self.player(video_id)?;
-        p.track.ok_or_else(|| Error::Unplayable {
-            status: p.status,
-            reason: p.reason.unwrap_or_else(|| "no track metadata".into()),
+        crate::operation::ensure(|| {
+            let p = self.player(video_id)?;
+            p.track.ok_or_else(|| Error::Unplayable {
+                status: p.status,
+                reason: p.reason.unwrap_or_else(|| "no track metadata".into()),
+            })
         })
     }
 
     pub fn lyrics(&self, video_id: &str) -> Result<Lyrics> {
-        let next = self.next_raw(video_id)?;
-        let tabs = parse::find(&next, "watchNextTabbedResultsRenderer")
-            .and_then(|v| v["tabs"].as_array())
-            .ok_or(Error::LyricsUnavailable)?;
-        let id = tabs
-            .iter()
-            .filter(|v| v["tabRenderer"]["unselectable"] != true)
-            .find_map(|v| {
-                let ep = &v["tabRenderer"]["endpoint"]["browseEndpoint"];
-                let id = ep["browseId"].as_str()?;
-                (id.starts_with("MPLY")
-                    || parse::find(ep, "pageType").and_then(Value::as_str)
-                        == Some("MUSIC_PAGE_TYPE_TRACK_LYRICS"))
-                .then_some(id)
-            })
-            .ok_or(Error::LyricsUnavailable)?;
-        parse::lyrics(&self.post("browse", json!({"browseId":id}))?, id)
+        crate::operation::ensure(|| {
+            let next = self.next_raw(video_id)?;
+            let tabs = parse::find(&next, "watchNextTabbedResultsRenderer")
+                .and_then(|v| v["tabs"].as_array())
+                .ok_or(Error::LyricsUnavailable)?;
+            let id = tabs
+                .iter()
+                .filter(|v| v["tabRenderer"]["unselectable"] != true)
+                .find_map(|v| {
+                    let ep = &v["tabRenderer"]["endpoint"]["browseEndpoint"];
+                    let id = ep["browseId"].as_str()?;
+                    (id.starts_with("MPLY")
+                        || parse::find(ep, "pageType").and_then(Value::as_str)
+                            == Some("MUSIC_PAGE_TYPE_TRACK_LYRICS"))
+                    .then_some(id)
+                })
+                .ok_or(Error::LyricsUnavailable)?;
+            parse::lyrics(&self.post("browse", json!({"browseId":id}))?, id)
+        })
     }
 }
 
@@ -518,6 +569,30 @@ pub(crate) fn validate_video_id(id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn write_cancelled_while_waiting_for_session_was_not_dispatched() {
+        let client = std::sync::Arc::new(
+            MusicClient::new(Config {
+                client_version: Some("fixture".into()),
+                ..Default::default()
+            })
+            .unwrap(),
+        );
+        let held = client.session.lock().unwrap();
+        let other = client.clone();
+        let context =
+            crate::operation::OperationContext::new(crate::operation::OperationOptions::default())
+                .unwrap();
+        let worker_context = context.clone();
+        let worker = std::thread::spawn(move || {
+            worker_context.run(|| other.post_write("playlist/create", json!({})))
+        });
+        std::thread::sleep(Duration::from_millis(20));
+        context.cancel();
+        assert!(matches!(worker.join().unwrap(), Err(Error::Cancelled)));
+        drop(held);
+    }
 
     #[test]
     fn legacy_oauth_config_is_rejected_without_exposing_credentials() {
