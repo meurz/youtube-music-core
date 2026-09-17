@@ -23,3 +23,13 @@ jobs:
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
       - run: cargo run --locked -- --help
+      - name: Build Windows release candidate
+        if: runner.os == 'Windows'
+        run: cargo build --release --locked
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: windows-release-candidate
+          path: |
+            target/release/ytmusic.exe
+            target/release/youtube_music_core.dll

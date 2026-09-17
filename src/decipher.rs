@@ -4,7 +4,7 @@
 //! are exposed to JavaScript, and no credentials are passed to this module.
 
 use crate::{Error, Result};
-use rquickjs::{Context, Runtime};
+use rquickjs::{CatchResultExt, CaughtError, Context, Runtime};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
@@ -28,7 +28,9 @@ const MAX_PLAYER_BYTES: usize = 8 * 1024 * 1024;
 const MAX_CHALLENGES: usize = 256;
 const MAX_CHALLENGE_BYTES: usize = 8192;
 const MEMORY_BYTES: usize = 256 * 1024 * 1024;
-const STACK_BYTES: usize = 512 * 1024;
+// Native interpreter frame sizes vary by compiler (especially MSVC). Reserve
+// enough room for real player AST traversal while retaining a strict ceiling.
+const STACK_BYTES: usize = 2 * 1024 * 1024;
 const TIME_BUDGET: Duration = Duration::from_secs(30);
 const MAX_PREPARED_BYTES: usize = 16 * 1024 * 1024;
 const MAX_PREPARED_PLAYERS: usize = 2;
@@ -151,7 +153,7 @@ fn evaluate_with_memory_limit(
     let input = input.to_owned();
     std::thread::Builder::new()
         .name("ytmusic-player".into())
-        .stack_size(4 * 1024 * 1024)
+        .stack_size(8 * 1024 * 1024)
         .spawn(move || evaluate_inner(&input, budget, memory_bytes))
         .map_err(|_| failure("cannot initialize player solver worker"))?
         .join()
@@ -175,7 +177,26 @@ fn evaluate_inner(input: &str, budget: Duration, memory_bytes: usize) -> Result<
             .and_then(|_| ctx.eval::<(), _>(AST_BINDINGS))
             .and_then(|_| ctx.eval::<(), _>(SOLVER))
             .and_then(|_| ctx.eval::<String, _>("JSON.stringify(jsc(JSON.parse(__solver_input)))"))
-            .map_err(|_| failure("player solver failed or exceeded its resource budget"))
+            .catch(&ctx)
+            .map_err(|error| {
+                // Only fixed categories may leave the sandbox. Raw exception
+                // messages/stacks can contain player input or signed URLs.
+                let message = match error {
+                    CaughtError::Exception(exception) => exception.message().unwrap_or_default(),
+                    _ => String::new(),
+                };
+                failure(
+                    if message.contains("stack overflow")
+                        || message.contains("Maximum call stack size exceeded")
+                    {
+                        "player solver exceeded its stack budget"
+                    } else if start.elapsed() >= budget {
+                        "player solver exceeded its time budget"
+                    } else {
+                        "player solver failed or exceeded its resource budget"
+                    },
+                )
+            })
     })
 }
 
@@ -253,6 +274,19 @@ mod tests {
     }
 
     #[test]
+    fn nested_player_expressions_fit_the_bounded_stack() {
+        let expression = format!(
+            "{}decodeURIComponent(signature).slice(1){}",
+            "String(".repeat(64),
+            ")".repeat(64)
+        );
+        let player = FIXTURE.replace("decodeURIComponent(signature).slice(1)", &expression);
+        let solved = solve(&player, &["abcdef".into()], &["xyz123".into()]).unwrap();
+        assert_eq!(solved.signatures["abcdef"], "bcdef");
+        assert_eq!(solved.n_values["xyz123"], "321zyx");
+    }
+
+    #[test]
     fn prepared_cache_reuses_only_player_source() {
         let prepared = prepare(FIXTURE).unwrap();
         let again = prepare(FIXTURE).unwrap();
@@ -314,7 +348,8 @@ mod tests {
         );
         let input = json!({"type":"preprocessed", "preprocessed_player":
             "function recurse(){return recurse()} recurse()", "requests":[]});
-        assert!(evaluate(&input.to_string(), TIME_BUDGET).is_err());
+        let error = evaluate(&input.to_string(), TIME_BUDGET).unwrap_err();
+        assert!(error.to_string().contains("stack budget"));
     }
 
     #[test]
