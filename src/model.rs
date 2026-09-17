@@ -6,7 +6,6 @@ use std::collections::BTreeMap;
 pub enum PlaybackClient {
     #[default]
     Auto,
-    AndroidVr,
     WebRemix,
 }
 
@@ -142,6 +141,9 @@ pub struct Player {
     pub expires_in_seconds: Option<u64>,
     pub audio_streams: Vec<AudioStream>,
     pub unresolved_audio_formats: usize,
+    /// Sanitized transform failure; metadata and directly playable formats remain available.
+    #[serde(default)]
+    pub resolution_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

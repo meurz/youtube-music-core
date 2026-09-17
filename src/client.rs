@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use sha1::{Digest, Sha1};
 use std::{
     io::Read,
-    sync::{Mutex, OnceLock},
+    sync::OnceLock,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -17,21 +17,73 @@ const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, lik
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 
 /// Credentials are deliberately not Debug. Never persist this struct in logs.
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Serialize)]
 pub struct Config {
     pub language: String,
     pub country: String,
     pub client_version: Option<String>,
     pub visitor_data: Option<String>,
     pub cookie: Option<String>,
-    pub oauth: Option<crate::oauth::OAuthSession>,
     pub po_token: Option<String>,
     pub proxy: Option<String>,
     pub timeout_seconds: u64,
     pub auth_user: u32,
     pub delegated_session_id: Option<String>,
     pub playback_client: PlaybackClient,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "Config", default, deny_unknown_fields)]
+struct ConfigFields {
+    pub language: String,
+    pub country: String,
+    pub client_version: Option<String>,
+    pub visitor_data: Option<String>,
+    pub cookie: Option<String>,
+    pub po_token: Option<String>,
+    pub proxy: Option<String>,
+    pub timeout_seconds: u64,
+    pub auth_user: u32,
+    pub delegated_session_id: Option<String>,
+    pub playback_client: PlaybackClient,
+}
+
+impl Default for ConfigFields {
+    fn default() -> Self {
+        let config = Config::default();
+        Self {
+            language: config.language,
+            country: config.country,
+            client_version: config.client_version,
+            visitor_data: config.visitor_data,
+            cookie: config.cookie,
+            po_token: config.po_token,
+            proxy: config.proxy,
+            timeout_seconds: config.timeout_seconds,
+            auth_user: config.auth_user,
+            delegated_session_id: config.delegated_session_id,
+            playback_client: config.playback_client,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Config {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let mut value = Value::deserialize(deserializer)?;
+        if let Some(fields) = value.as_object_mut() {
+            for key in ["oauth", "music_oauth"] {
+                if fields
+                    .remove(key)
+                    .is_some_and(|credential| !credential.is_null())
+                {
+                    return Err(serde::de::Error::custom(crate::auth::LEGACY_AUTH_MESSAGE));
+                }
+            }
+        }
+        ConfigFields::deserialize(value).map_err(serde::de::Error::custom)
+    }
 }
 
 impl Default for Config {
@@ -42,7 +94,6 @@ impl Default for Config {
             client_version: None,
             visitor_data: None,
             cookie: None,
-            oauth: None,
             po_token: None,
             proxy: None,
             timeout_seconds: 30,
@@ -56,9 +107,7 @@ impl Default for Config {
 pub struct MusicClient {
     pub(crate) http: Client,
     pub(crate) config: Config,
-    pub(crate) signature_timestamp: OnceLock<u64>,
-    oauth: Mutex<Option<crate::oauth::OAuthSession>>,
-    tv_version: OnceLock<String>,
+    pub(crate) web_player: OnceLock<crate::playback::WebPlayerScript>,
 }
 
 pub(crate) fn network(e: reqwest::Error) -> Error {
@@ -135,15 +184,6 @@ impl MusicClient {
     /// Blocking client. Async hosts should call it on a dedicated blocking worker.
     /// Unless client_version is supplied, bootstraps the current web client first.
     pub fn new(mut config: Config) -> Result<Self> {
-        if let Some(oauth) = &config.oauth {
-            oauth.validate()?;
-            if config.cookie.is_some()
-                || config.auth_user != 0
-                || config.delegated_session_id.is_some()
-            {
-                return Err(Error::InvalidInput("OAuth selects its own account; do not combine it with browser credentials or account overrides".into()));
-            }
-        }
         if config.auth_user > 99 {
             return Err(Error::InvalidInput(
                 "auth_user must be between 0 and 99".into(),
@@ -191,31 +231,9 @@ impl MusicClient {
         }
         Ok(Self {
             http,
-            oauth: Mutex::new(config.oauth.clone()),
-            tv_version: OnceLock::new(),
             config,
-            signature_timestamp: OnceLock::new(),
+            web_player: OnceLock::new(),
         })
-    }
-
-    /// Return updated OAuth state for host-owned secure persistence after calls.
-    pub fn oauth_session(&self) -> Result<Option<crate::oauth::OAuthSession>> {
-        self.oauth
-            .lock()
-            .map(|session| session.clone())
-            .map_err(|_| Error::Protocol("OAuth session lock failed".into()))
-    }
-
-    fn oauth_access_token(&self) -> Result<Option<String>> {
-        let mut state = self
-            .oauth
-            .lock()
-            .map_err(|_| Error::Protocol("OAuth session lock failed".into()))?;
-        if let Some(session) = state.as_mut() {
-            session.refresh_if_needed(&self.http)?;
-            return Ok(Some(session.access_token.clone()));
-        }
-        Ok(None)
     }
 
     fn web_request(
@@ -267,66 +285,16 @@ impl MusicClient {
             .json(&body))
     }
 
-    fn tv_request(
-        &self,
-        endpoint: &str,
-        mut body: Value,
-    ) -> Result<reqwest::blocking::RequestBuilder> {
-        const TV: &str = "https://www.youtube.com";
-        const TV_UA: &str = "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version";
-        let token = self
-            .oauth_access_token()?
-            .ok_or(Error::AuthenticationRequired)?;
-        if self.tv_version.get().is_none() {
-            let html = checked_response(
-                self.http
-                    .get(format!("{TV}/tv"))
-                    .header("User-Agent", TV_UA)
-                    .send()
-                    .map_err(network)?,
-            )?;
-            let version = config_string(&html, "INNERTUBE_CLIENT_VERSION")
-                .ok_or_else(|| Error::Protocol("TV client version is missing".into()))?;
-            let _ = self.tv_version.set(version);
-        }
-        body["context"] = json!({"client":{"clientName":"TVHTML5","clientVersion":self.tv_version.get(),"hl":self.config.language,"gl":self.config.country},"user":{"lockedSafetyMode":false}});
-        let mut headers = HeaderMap::new();
-        header(&mut headers, "authorization", &format!("Bearer {token}"))?;
-        header(&mut headers, "user-agent", TV_UA)?;
-        Ok(self
-            .http
-            .post(format!("{TV}/youtubei/v1/{endpoint}?prettyPrint=false"))
-            .headers(headers)
-            .json(&body))
-    }
-
-    pub(crate) fn account_post(&self, endpoint: &str, body: Value) -> Result<Value> {
-        if self.config.oauth.is_some() {
-            let response = self.tv_request(endpoint, body)?.send().map_err(network)?;
-            return serde_json::from_str(&checked_response(response)?)
-                .map_err(|_| Error::Protocol("TV API returned invalid JSON".into()));
-        }
-        self.post(endpoint, body)
-    }
-
-    pub(crate) fn account_page(&self, value: &Value) -> Result<Page> {
-        if self.config.oauth.is_some() {
-            parse::tv_page(value)
-        } else {
-            parse::page(value)
-        }
-    }
-
     pub(crate) fn post(&self, endpoint: &str, body: Value) -> Result<Value> {
         let response = self.web_request(endpoint, body)?.send().map_err(network)?;
         let value: Value = serde_json::from_str(&checked_response(response)?)
             .map_err(|_| Error::Protocol("API returned invalid JSON".into()))?;
         if let Some(error) = value.get("error") {
-            return Err(Error::Protocol(format!(
-                "API error {}: {}",
-                error["code"],
-                error["message"].as_str().unwrap_or("unknown")
-            )));
+            // Upstream messages may reflect submitted values; expose only a numeric code.
+            return Err(Error::Protocol(match error["code"].as_u64() {
+                Some(code) => format!("API error {code}"),
+                None => "API returned an error".into(),
+            }));
         }
         Ok(value)
     }
@@ -337,13 +305,14 @@ impl MusicClient {
         if let Some(params) = filter.params() {
             body["params"] = params.into();
         }
-        parse::page(&self.post("search", body)?)
+        let value = self.post("search", body)?;
+        parse::page(&value)
     }
 
     /// A browse ID can identify an album, artist, playlist, or home feed.
     pub fn browse(&self, browse_id: &str) -> Result<Page> {
         nonempty(browse_id, "browse_id")?;
-        self.account_page(&self.account_post("browse", json!({"browseId":browse_id}))?)
+        parse::page(&self.post("browse", json!({"browseId":browse_id}))?)
     }
 
     pub fn playlist(&self, playlist_id: &str) -> Result<Page> {
@@ -358,11 +327,7 @@ impl MusicClient {
 
     pub fn continue_page(&self, endpoint: ContinuationEndpoint, token: &str) -> Result<Page> {
         nonempty(token, "continuation")?;
-        if matches!(endpoint, ContinuationEndpoint::Browse) {
-            self.account_page(&self.account_post(endpoint.as_str(), json!({"continuation":token}))?)
-        } else {
-            parse::page(&self.post(endpoint.as_str(), json!({"continuation":token}))?)
-        }
+        parse::page(&self.post(endpoint.as_str(), json!({"continuation":token}))?)
     }
 
     fn next_raw(&self, video_id: &str) -> Result<Value> {
@@ -462,44 +427,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn oauth_bearer_is_music_scoped_and_never_combined_with_cookies() {
-        let session = crate::oauth::OAuthSession {
-            access_token: "synthetic-access".into(),
-            refresh_token: "synthetic-refresh".into(),
-            expires_at: u64::MAX,
-            client_id: "synthetic-client".into(),
-            client_secret: "synthetic-secret".into(),
-        };
-        let mut config = Config {
-            client_version: Some("test".into()),
-            cookie: Some("SAPISID=old".into()),
-            ..Default::default()
-        };
-        session.apply_to(&mut config).unwrap();
+    fn legacy_oauth_config_is_rejected_without_exposing_credentials() {
+        for key in ["oauth", "music_oauth"] {
+            let input =
+                json!({key:{"access_token":"private-access","refresh_token":"private-refresh"}});
+            let error = Config::deserialize(input).err().unwrap().to_string();
+            assert!(error.contains(crate::auth::LEGACY_AUTH_MESSAGE));
+            assert!(!error.contains("private"));
+        }
+        // Old browser configs serialized unused OAuth slots as null.
+        let config: Config =
+            serde_json::from_value(json!({"oauth":null,"music_oauth":null})).unwrap();
         assert!(config.cookie.is_none());
-        let client = MusicClient::new(config).unwrap();
-        let _ = client.tv_version.set("test".into());
-        let request = client
-            .tv_request("account/accounts_list", json!({}))
-            .unwrap()
-            .build()
-            .unwrap();
-        assert_eq!(
-            request.headers()["authorization"],
-            "Bearer synthetic-access"
-        );
-        assert!(request.headers()["authorization"].is_sensitive());
-        assert!(!request.headers().contains_key("cookie"));
-        let anonymous = client.http.get("https://www.youtube.com/").build().unwrap();
-        assert!(!anonymous.headers().contains_key("authorization"));
-        assert_eq!(client.oauth_session().unwrap().unwrap(), session);
-        let conflicting = Config {
-            client_version: Some("test".into()),
-            cookie: Some("SAPISID=old".into()),
-            oauth: Some(session),
-            ..Default::default()
-        };
-        assert!(MusicClient::new(conflicting).is_err());
     }
 
     #[test]
@@ -529,9 +468,38 @@ mod tests {
         let body: Value =
             serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
         assert_eq!(body["context"]["user"]["onBehalfOfUser"], "12345");
+        assert_eq!(body["context"]["client"]["clientName"], "WEB_REMIX");
+        assert_eq!(request.headers()["x-youtube-client-name"], "67");
         let anonymous = client.http.get("https://www.youtube.com/").build().unwrap();
         assert!(!anonymous.headers().contains_key("cookie"));
         assert!(!anonymous.headers().contains_key("authorization"));
+    }
+
+    #[test]
+    fn anonymous_catalog_uses_the_same_web_client_without_account_headers() {
+        let client = MusicClient::new(Config {
+            client_version: Some("test".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        let request = client
+            .web_request("search", json!({"query":"music"}))
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(request.url().host_str(), Some("music.youtube.com"));
+        assert_eq!(request.headers()["x-youtube-client-name"], "67");
+        for name in [
+            "cookie",
+            "authorization",
+            "x-goog-authuser",
+            "x-goog-pageid",
+        ] {
+            assert!(!request.headers().contains_key(name));
+        }
+        let body: Value =
+            serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
+        assert_eq!(body["context"]["client"]["clientName"], "WEB_REMIX");
     }
 
     #[test]

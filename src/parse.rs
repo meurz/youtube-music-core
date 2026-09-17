@@ -164,19 +164,25 @@ fn parse_item(r: &Value) -> Option<Item> {
         .iter()
         .find(|(_, t)| t == "MUSIC_PAGE_TYPE_ALBUM")
         .map(|(l, _)| l.clone());
-    let duration_seconds = duration(&text(&r["lengthText"])).or_else(|| {
-        ["fixedColumns", "flexColumns"].iter().find_map(|key| {
-            r[*key].as_array()?.iter().find_map(|c| {
-                let t = find(c, "text")?;
-                duration(&text(t)).or_else(|| {
-                    t["runs"]
-                        .as_array()?
-                        .iter()
-                        .find_map(|run| duration(run["text"].as_str()?))
+    let duration_seconds = duration(&text(&r["lengthText"]))
+        .or_else(|| {
+            text(&r["subtitle"])
+                .split('•')
+                .find_map(|s| duration(s.trim()))
+        })
+        .or_else(|| {
+            ["fixedColumns", "flexColumns"].iter().find_map(|key| {
+                r[*key].as_array()?.iter().find_map(|c| {
+                    let t = find(c, "text")?;
+                    duration(&text(t)).or_else(|| {
+                        t["runs"]
+                            .as_array()?
+                            .iter()
+                            .find_map(|run| duration(run["text"].as_str()?))
+                    })
                 })
             })
-        })
-    });
+        });
     let explicit = r
         .get("badges")
         .is_some_and(|b| b.to_string().contains("MUSIC_EXPLICIT_BADGE"));
@@ -326,6 +332,15 @@ pub fn page(v: &Value) -> Result<Page> {
 }
 
 pub fn player(v: &Value) -> Result<Player> {
+    parse_player(v, false)
+}
+
+/// Only called after every Web audio challenge has been resolved locally.
+pub(crate) fn resolved_web_player(v: &Value) -> Result<Player> {
+    parse_player(v, true)
+}
+
+fn parse_player(v: &Value, resolved: bool) -> Result<Player> {
     let status = v["playabilityStatus"]["status"]
         .as_str()
         .ok_or_else(|| Error::Protocol("missing playabilityStatus".into()))?
@@ -356,7 +371,9 @@ pub fn player(v: &Value) -> Result<Player> {
         let url = format["url"]
             .as_str()
             .and_then(|u| reqwest::Url::parse(u).ok())
-            .filter(|u| u.scheme() == "https" && !u.query_pairs().any(|(key, _)| key == "n"));
+            .filter(|u| {
+                u.scheme() == "https" && (resolved || !u.query_pairs().any(|(key, _)| key == "n"))
+            });
         let (Some(url), Some(itag)) = (url, format["itag"].as_u64()) else {
             unresolved_audio_formats += 1;
             continue;
@@ -385,6 +402,7 @@ pub fn player(v: &Value) -> Result<Player> {
         expires_in_seconds: number(&v["streamingData"]["expiresInSeconds"]),
         audio_streams,
         unresolved_audio_formats,
+        resolution_error: None,
     })
 }
 
@@ -400,58 +418,4 @@ pub fn lyrics(v: &Value, browse_id: &str) -> Result<Lyrics> {
         text,
         source: (!source.is_empty()).then_some(source),
     })
-}
-
-/// TV uses tile cards for the same music entities and distinct playlist shelves.
-/// Normalize only display data and primary selection endpoints, dropping menus.
-pub fn tv_page(value: &Value) -> Result<Page> {
-    fn normalize(value: &Value) -> Value {
-        match value {
-            Value::Object(map) => {
-                if let Some(tab) = map.get("tabRenderer") {
-                    if tab["selected"] == false {
-                        return Value::Null;
-                    }
-                }
-                if let Some(tile) = map.get("tileRenderer") {
-                    let metadata = &tile["metadata"]["tileMetadataRenderer"];
-                    let header = &tile["header"]["tileHeaderRenderer"];
-                    let duration = find(header, "thumbnailOverlayTimeStatusRenderer")
-                        .map(|r| r["text"].clone())
-                        .unwrap_or(Value::Null);
-                    let mut endpoint = tile["onSelectCommand"].clone();
-                    if tile["contentType"] == "TILE_CONTENT_TYPE_PLAYLIST"
-                        && endpoint["browseEndpoint"].is_null()
-                    {
-                        if let Some(id) = endpoint["watchEndpoint"]["playlistId"].as_str() {
-                            let browse_id = if id.starts_with("VL") {
-                                id.to_owned()
-                            } else {
-                                format!("VL{id}")
-                            };
-                            endpoint["browseEndpoint"] = serde_json::json!({"browseId":browse_id,"browseEndpointContextSupportedConfigs":{"browseEndpointContextMusicConfig":{"pageType":"MUSIC_PAGE_TYPE_PLAYLIST"}}});
-                        }
-                    }
-                    return serde_json::json!({"musicTwoRowItemRenderer":{
-                        "title":metadata["title"],"subtitle":metadata["lines"],
-                        "navigationEndpoint":endpoint,"thumbnail":header["thumbnail"],"lengthText":duration
-                    }});
-                }
-                let mut result = serde_json::Map::new();
-                for (key, value) in map {
-                    let key = match key.as_str() {
-                        "playlistVideoListRenderer" => "musicPlaylistShelfRenderer",
-                        "horizontalListRenderer" => "musicShelfRenderer",
-                        "entityMetadataRenderer" => "musicDetailHeaderRenderer",
-                        other => other,
-                    };
-                    result.insert(key.into(), normalize(value));
-                }
-                Value::Object(result)
-            }
-            Value::Array(items) => Value::Array(items.iter().map(normalize).collect()),
-            value => value.clone(),
-        }
-    }
-    page(&normalize(value))
 }

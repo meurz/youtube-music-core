@@ -1,178 +1,263 @@
 use crate::{
-    client::{checked_response, header, network, validate_video_id},
-    model::{AudioFormat, AudioStream, PlaybackClient, Player, StreamVerification},
+    client::{checked_response, config_string, header, network, validate_video_id},
+    model::{AudioFormat, AudioStream, Player, StreamVerification},
     parse, Error, MusicClient, Result,
 };
 use reqwest::{blocking::Response, header::HeaderMap, Url};
 use serde_json::{json, Value};
 use std::{
+    collections::BTreeSet,
     io::Read,
     time::{SystemTime, UNIX_EPOCH},
 };
 
-const VR_VERSION: &str = "1.65.10";
-const VR_UA: &str = "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip";
 const WEB_UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const PROBE_BYTES: u64 = 4096;
 
-fn profiles(mode: PlaybackClient) -> &'static [PlaybackClient] {
-    match mode {
-        PlaybackClient::Auto => &[PlaybackClient::AndroidVr, PlaybackClient::WebRemix],
-        PlaybackClient::AndroidVr => &[PlaybackClient::AndroidVr],
-        PlaybackClient::WebRemix => &[PlaybackClient::WebRemix],
-    }
+pub(crate) struct WebPlayerScript {
+    source: String,
+    timestamp: u32,
 }
 
-fn profile_name(profile: PlaybackClient) -> &'static str {
-    match profile {
-        PlaybackClient::AndroidVr => "ANDROID_VR",
-        PlaybackClient::WebRemix => "WEB_REMIX",
-        PlaybackClient::Auto => "AUTO",
+fn player_script_url(html: &str) -> Result<Url> {
+    let path = config_string(html, "jsUrl")
+        .or_else(|| config_string(html, "PLAYER_JS_URL"))
+        .ok_or_else(|| Error::Protocol("Music page has no Web player script".into()))?;
+    let base = Url::parse("https://music.youtube.com/").expect("constant URL");
+    let url = base
+        .join(&path)
+        .map_err(|_| Error::Protocol("invalid Web player script URL".into()))?;
+    if url.scheme() != "https"
+        || !matches!(
+            url.host_str(),
+            Some("music.youtube.com" | "www.youtube.com")
+        )
+        || url.port_or_known_default() != Some(443)
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || !url.path().starts_with("/s/player/")
+        || !url.path().ends_with("/base.js")
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(Error::Protocol(
+            "Web player script must use the official YouTube player path".into(),
+        ));
     }
+    Ok(url)
 }
 
-fn vr_body(video_id: &str, config: &crate::Config) -> Value {
-    let mut client = json!({
-        "clientName":"ANDROID_VR", "clientVersion":VR_VERSION,
-        "deviceMake":"Oculus", "deviceModel":"Quest 3", "androidSdkVersion":32,
-        "userAgent":VR_UA, "osName":"Android", "osVersion":"12L",
-        "hl":config.language, "gl":config.country,
-    });
-    if let Some(visitor) = &config.visitor_data {
-        client["visitorData"] = visitor.clone().into();
-    }
-    json!({"context":{"client":client}, "videoId":video_id, "contentCheckOk":true, "racyCheckOk":true})
+struct PendingAudio {
+    index: usize,
+    url: Url,
+    signature: Option<(String, String)>,
+    n: Option<String>,
 }
 
-fn vr_headers(config: &crate::Config) -> Result<HeaderMap> {
-    // This profile is anonymous even when catalog requests use account cookies.
-    let mut headers = HeaderMap::new();
-    header(&mut headers, "user-agent", VR_UA)?;
-    header(&mut headers, "x-youtube-client-name", "28")?;
-    header(&mut headers, "x-youtube-client-version", VR_VERSION)?;
-    if let Some(visitor) = &config.visitor_data {
-        header(&mut headers, "x-goog-visitor-id", visitor)?;
+fn only_query_value(url: &Url, name: &str) -> Result<Option<String>> {
+    let mut matches = url.query_pairs().filter(|(key, _)| key == name);
+    let value = matches.next().map(|(_, v)| v.into_owned());
+    if matches.next().is_some() {
+        return Err(Error::Protocol(
+            "duplicate Web player challenge parameter".into(),
+        ));
     }
-    Ok(headers)
+    Ok(value)
 }
 
-fn timestamp(html: &str) -> Option<u64> {
-    let rest = html.split_once("\"STS\":")?.1.trim_start();
-    serde_json::Deserializer::from_str(rest)
-        .into_iter::<u64>()
-        .next()?
-        .ok()
-        .filter(|n| *n > 0)
+fn collect_audio(raw: &Value) -> Result<Vec<PendingAudio>> {
+    let mut pending = Vec::new();
+    for (index, format) in raw["streamingData"]["adaptiveFormats"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .enumerate()
+    {
+        if !format["mimeType"]
+            .as_str()
+            .is_some_and(|m| m.starts_with("audio/"))
+        {
+            continue;
+        }
+        if pending.len() >= 64 {
+            return Err(Error::Protocol("too many Web audio formats".into()));
+        }
+        let (url, signature) = if let Some(url) = format["url"].as_str() {
+            (media_url(url)?, None)
+        } else if let Some(cipher) = format["signatureCipher"]
+            .as_str()
+            .or_else(|| format["cipher"].as_str())
+        {
+            if cipher.len() > 65536 {
+                return Err(Error::Protocol("Web cipher exceeds size limit".into()));
+            }
+            let mut query = Url::parse("https://music.youtube.com/").expect("constant URL");
+            query.set_query(Some(cipher));
+            let url = only_query_value(&query, "url")?
+                .ok_or_else(|| Error::Protocol("Web cipher has no media URL".into()))?;
+            let signature = only_query_value(&query, "s")?
+                .ok_or_else(|| Error::Protocol("Web cipher has no signature".into()))?;
+            let sp = only_query_value(&query, "sp")?.unwrap_or_else(|| "signature".into());
+            if sp.is_empty()
+                || sp.len() > 64
+                || !sp.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                || sp == "n"
+            {
+                return Err(Error::Protocol("invalid Web signature parameter".into()));
+            }
+            (media_url(&url)?, Some((sp, signature)))
+        } else {
+            continue;
+        };
+        let n = only_query_value(&url, "n")?;
+        pending.push(PendingAudio {
+            index,
+            url,
+            signature,
+            n,
+        });
+    }
+    Ok(pending)
+}
+
+fn replace_query(url: &mut Url, key: &str, value: &str) {
+    let pairs: Vec<(String, String)> = url
+        .query_pairs()
+        .filter(|(k, _)| k != key)
+        .map(|(k, v)| (k.into_owned(), v.into_owned()))
+        .collect();
+    url.set_query(None);
+    url.query_pairs_mut()
+        .extend_pairs(pairs)
+        .append_pair(key, value);
+}
+
+fn resolve_web_urls(raw: &mut Value, script: &str) -> Result<()> {
+    let pending = collect_audio(raw)?;
+    let signatures: Vec<String> = pending
+        .iter()
+        .filter_map(|p| p.signature.as_ref().map(|(_, s)| s.clone()))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let n_values: Vec<String> = pending
+        .iter()
+        .filter_map(|p| p.n.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    if signatures.is_empty() && n_values.is_empty() {
+        return Ok(());
+    }
+    let solved = crate::decipher::solve(script, &signatures, &n_values)?;
+    for mut audio in pending {
+        if let Some((sp, signature)) = audio.signature {
+            let decoded = solved
+                .signatures
+                .get(&signature)
+                .ok_or_else(|| Error::Protocol("Web signature resolution failed".into()))?;
+            replace_query(&mut audio.url, &sp, decoded);
+        }
+        if let Some(n) = audio.n {
+            let decoded = solved
+                .n_values
+                .get(&n)
+                .ok_or_else(|| Error::Protocol("Web n resolution failed".into()))?;
+            replace_query(&mut audio.url, "n", decoded);
+        }
+        raw["streamingData"]["adaptiveFormats"][audio.index]["url"] = audio.url.as_str().into();
+    }
+    Ok(())
+}
+
+fn parse_web_player(mut raw: Value, script: &str, video_id: &str) -> Result<Player> {
+    // Preserve the original parser result before any URL mutation. It never
+    // exposes raw n challenges as ready streams, including on solver failure.
+    let mut metadata = parse::player(&raw)?;
+    if metadata
+        .track
+        .as_ref()
+        .is_some_and(|t| t.video_id != video_id)
+        || (raw["streamingData"].is_object() && metadata.track.is_none())
+    {
+        return Err(Error::Protocol(
+            "player track does not match the requested video".into(),
+        ));
+    }
+    let mut player = match resolve_web_urls(&mut raw, script) {
+        Ok(()) => parse::resolved_web_player(&raw)?,
+        Err(error) => {
+            metadata.resolution_error = Some(match error {
+                Error::StreamUnavailable(message) => message,
+                other => other.to_string(),
+            });
+            let before = metadata.audio_streams.len();
+            metadata
+                .audio_streams
+                .retain(|audio| media_url(&audio.url).is_ok());
+            metadata.unresolved_audio_formats += before - metadata.audio_streams.len();
+            metadata
+        }
+    };
+    player.source_client = Some("WEB_REMIX".into());
+    for audio in &mut player.audio_streams {
+        audio.source_client = player.source_client.clone();
+        audio
+            .http_headers
+            .insert("User-Agent".into(), WEB_UA.into());
+    }
+    Ok(player)
 }
 
 impl MusicClient {
-    fn web_timestamp(&self, video_id: &str) -> Result<u64> {
-        if let Some(timestamp) = self.signature_timestamp.get() {
-            return Ok(*timestamp);
-        }
-        // Fixed YouTube host and validated ID; no account headers on this bootstrap.
-        let html = checked_response(
-            self.http
-                .get(format!("https://www.youtube.com/watch?v={video_id}"))
-                .send()
-                .map_err(network)?,
-        )?;
-        let timestamp = timestamp(&html).ok_or_else(|| {
-            Error::Protocol("watch page is missing the current signature timestamp".into())
-        })?;
-        let _ = self.signature_timestamp.set(timestamp);
-        Ok(timestamp)
-    }
-
-    fn profile_player(&self, video_id: &str, profile: PlaybackClient) -> Result<Player> {
-        let raw = match profile {
-            PlaybackClient::AndroidVr => {
-                let response = self
-                    .http
-                    .post("https://www.youtube.com/youtubei/v1/player?prettyPrint=false")
-                    .headers(vr_headers(&self.config)?)
-                    .json(&vr_body(video_id, &self.config))
+    fn web_player_script(&self, video_id: &str) -> Result<&WebPlayerScript> {
+        if self.web_player.get().is_none() {
+            let mut headers = HeaderMap::new();
+            if let Some(cookie) = &self.config.cookie {
+                header(&mut headers, "cookie", cookie)?;
+            }
+            let html = checked_response(
+                self.http
+                    .get(format!("https://music.youtube.com/watch?v={video_id}"))
+                    .headers(headers)
                     .send()
-                    .map_err(network)?;
-                serde_json::from_str(&checked_response(response)?)
-                    .map_err(|_| Error::Protocol("player returned invalid JSON".into()))?
-            }
-            PlaybackClient::WebRemix => {
-                let mut body = json!({"videoId":video_id, "contentCheckOk":true, "racyCheckOk":true,
-                    "playbackContext":{"contentPlaybackContext":{"signatureTimestamp":self.web_timestamp(video_id)?, "html5Preference":"HTML5_PREF_WANTS"}}});
-                if let Some(token) = &self.config.po_token {
-                    body["serviceIntegrityDimensions"] = json!({"poToken":token});
-                }
-                self.post("player", body)?
-            }
-            PlaybackClient::Auto => unreachable!("auto expands to concrete profiles"),
-        };
-        let mut player = parse::player(&raw)?;
-        if player
-            .track
-            .as_ref()
-            .is_some_and(|t| t.video_id != video_id)
-            || (!player.audio_streams.is_empty() && player.track.is_none())
-        {
-            return Err(Error::Protocol(
-                "player track does not match the requested video".into(),
-            ));
+                    .map_err(network)?,
+            )?;
+            let url = player_script_url(&html)?;
+            // Static player code needs no account headers. Reject all redirects.
+            let source = checked_response(self.http.get(url).send().map_err(network)?)?;
+            let timestamp = crate::decipher::signature_timestamp(&source)
+                .ok_or_else(|| Error::Protocol("Web player has no signature timestamp".into()))?;
+            let _ = self.web_player.set(WebPlayerScript { source, timestamp });
         }
-        player.source_client = Some(profile_name(profile).into());
-        let ua = if profile == PlaybackClient::AndroidVr {
-            VR_UA
-        } else {
-            WEB_UA
-        };
-        for audio in &mut player.audio_streams {
-            audio.source_client = player.source_client.clone();
-            audio.http_headers.insert("User-Agent".into(), ua.into());
-        }
-        Ok(player)
+        self.web_player
+            .get()
+            .ok_or_else(|| Error::Protocol("Web player bootstrap failed".into()))
     }
 
-    /// Inspect the first usable player profile, preserving unavailable metadata.
-    /// URLs here have not been probed; use stream() for a verified media URL.
+    /// Inspect the Web player and resolve its signature/n challenges without CDN probing.
     pub fn player(&self, video_id: &str) -> Result<Player> {
         validate_video_id(video_id)?;
-        let mut fallback: Option<Player> = None;
-        let mut errors = Vec::new();
-        for &profile in profiles(self.config.playback_client) {
-            match self.profile_player(video_id, profile) {
-                Ok(player) => {
-                    if player.status == "OK" && !player.audio_streams.is_empty() {
-                        return Ok(player);
-                    }
-                    if fallback.is_none() || player.status == "OK" {
-                        fallback = Some(player);
-                    }
-                }
-                Err(error) => errors.push(format!("{}: {error}", profile_name(profile))),
-            }
+        let script = self.web_player_script(video_id)?;
+        let mut body = json!({"videoId":video_id,"contentCheckOk":true,"racyCheckOk":true,
+            "playbackContext":{"contentPlaybackContext":{"signatureTimestamp":script.timestamp,"html5Preference":"HTML5_PREF_WANTS"}}});
+        if let Some(token) = &self.config.po_token {
+            body["serviceIntegrityDimensions"] = json!({"poToken":token});
         }
-        fallback.ok_or_else(|| Error::StreamUnavailable(errors.join("; ")))
+        let raw = self.post("player", body)?;
+        parse_web_player(raw, &script.source, video_id)
     }
 
-    /// Return the highest-bitrate audio format that passes a bounded CDN GET.
-    /// Failed formats are skipped, then the next configured client is attempted.
+    /// Return the highest-bitrate Web audio format that passes a bounded CDN GET.
     pub fn stream(&self, video_id: &str) -> Result<AudioStream> {
         self.stream_format(video_id, AudioFormat::Any)
     }
 
-    /// Resolve and validate audio in a host-compatible container.
+    /// Resolve and validate Web audio in a host-compatible container.
     pub fn stream_format(&self, video_id: &str, format: AudioFormat) -> Result<AudioStream> {
-        validate_video_id(video_id)?;
-        let mut errors = Vec::new();
-        for &profile in profiles(self.config.playback_client) {
-            let result = self.profile_player(video_id, profile).and_then(|player| {
-                select_verified(player, format, |audio| self.probe_audio(audio))
-            });
-            match result {
-                Ok(audio) => return Ok(audio),
-                Err(error) => errors.push(format!("{}: {error}", profile_name(profile))),
-            }
-        }
-        Err(Error::StreamUnavailable(errors.join("; ")))
+        select_verified(self.player(video_id)?, format, |audio| {
+            self.probe_audio(audio)
+        })
     }
 
     fn probe_audio(&self, audio: &mut AudioStream) -> Result<()> {
@@ -233,7 +318,10 @@ fn select_verified(
         });
     }
     if player.audio_streams.is_empty() {
-        return Err(Error::StreamResolutionRequired);
+        return Err(player
+            .resolution_error
+            .map(Error::StreamUnavailable)
+            .unwrap_or(Error::StreamResolutionRequired));
     }
     player
         .audio_streams
@@ -403,41 +491,101 @@ mod tests {
         ]}})).unwrap()
     }
 
+    fn unsupported_player_response() -> Value {
+        json!({"playabilityStatus":{"status":"OK"},
+        "videoDetails":{"videoId":"4D7u5KF7SP8","title":"Metadata survives"},
+        "streamingData":{"adaptiveFormats":[
+            {"itag":140,"mimeType":"audio/mp4","url":"https://rr1.googlevideo.com/videoplayback?expire=4102444800"},
+            {"itag":251,"mimeType":"audio/webm","url":"https://rr1.googlevideo.com/videoplayback?n=private-challenge"}
+        ]}})
+    }
+
     #[test]
-    fn vr_profile_is_anonymous_and_has_matching_identity() {
-        let config = crate::Config {
-            cookie: Some("SAPISID=private".into()),
-            po_token: Some("private".into()),
-            ..Default::default()
-        };
-        let headers = vr_headers(&config).unwrap();
-        let body = vr_body("4D7u5KF7SP8", &config);
-        assert!(!headers.contains_key("cookie"));
-        assert!(!headers.contains_key("authorization"));
-        assert!(!body.to_string().contains("private"));
-        assert_eq!(headers["x-youtube-client-name"], "28");
-        assert_eq!(
-            headers["user-agent"],
-            body["context"]["client"]["userAgent"].as_str().unwrap()
-        );
-        assert_eq!(
-            headers["x-youtube-client-version"],
-            body["context"]["client"]["clientVersion"].as_str().unwrap()
-        );
-        assert_eq!(body["context"]["client"]["osVersion"], "12L");
-        assert!(body.get("playbackContext").is_none());
-        let client = MusicClient::new(crate::Config {
-            client_version: Some("test".into()),
-            ..config
-        })
+    fn unresolved_web_challenge_preserves_metadata_and_safe_direct_formats() {
+        let player = parse_web_player(
+            unsupported_player_response(),
+            "unsupported player",
+            "4D7u5KF7SP8",
+        )
         .unwrap();
-        let media_request = client
-            .http
-            .get("https://rr1.googlevideo.com/videoplayback")
-            .build()
-            .unwrap();
-        assert!(!media_request.headers().contains_key("cookie"));
-        assert!(!media_request.headers().contains_key("authorization"));
+        assert_eq!(player.track.as_ref().unwrap().title, "Metadata survives");
+        assert_eq!(player.audio_streams.len(), 1);
+        assert_eq!(player.audio_streams[0].itag, 140);
+        assert_eq!(player.unresolved_audio_formats, 1);
+        assert!(player.resolution_error.is_some());
+        assert!(!player
+            .resolution_error
+            .as_ref()
+            .unwrap()
+            .contains("private-challenge"));
+        assert_eq!(
+            select_verified(player, AudioFormat::Any, |_| Ok(()))
+                .unwrap()
+                .itag,
+            140
+        );
+    }
+
+    #[test]
+    fn unresolved_web_only_response_has_metadata_but_cannot_be_selected() {
+        let mut response = unsupported_player_response();
+        response["streamingData"]["adaptiveFormats"]
+            .as_array_mut()
+            .unwrap()
+            .remove(0);
+        let player = parse_web_player(response, "unsupported player", "4D7u5KF7SP8").unwrap();
+        assert!(player.track.is_some());
+        assert!(player.audio_streams.is_empty());
+        assert_eq!(player.unresolved_audio_formats, 1);
+        let error = select_verified(player, AudioFormat::Any, |_| {
+            panic!("unresolved URLs must never be probed")
+        })
+        .unwrap_err();
+        assert!(matches!(error, Error::StreamUnavailable(_)));
+        assert!(!error.to_string().contains("private-challenge"));
+    }
+
+    #[test]
+    fn failed_web_resolution_does_not_expose_untrusted_direct_urls() {
+        let mut response = unsupported_player_response();
+        response["streamingData"]["adaptiveFormats"][0]["url"] =
+            "https://evil.test/videoplayback".into();
+        let player = parse_web_player(response, "unsupported player", "4D7u5KF7SP8").unwrap();
+        assert!(player.audio_streams.is_empty());
+        assert_eq!(player.unresolved_audio_formats, 2);
+        assert!(player.track.is_some());
+    }
+
+    #[test]
+    fn only_official_player_scripts_are_accepted() {
+        let good = r#"{"jsUrl":"/s/player/test/player_es6.vflset/en_US/base.js"}"#;
+        assert_eq!(
+            player_script_url(good).unwrap().host_str(),
+            Some("music.youtube.com")
+        );
+        for path in [
+            "https://evil.test/s/player/x/base.js",
+            "//evil.test/s/player/x/base.js",
+            "https://music.youtube.com:444/s/player/x/base.js",
+            "/s/player/x/base.js?secret=1",
+            "/s/player/../../evil/base.js",
+        ] {
+            assert!(player_script_url(&json!({"jsUrl":path}).to_string()).is_err());
+        }
+    }
+
+    #[test]
+    fn malformed_cipher_cannot_redirect_credentials_or_hide_duplicates() {
+        for cipher in [
+            "url=https%3A%2F%2Fevil.test%2Fvideoplayback&s=private",
+            "url=a&url=b&s=private",
+            "url=https%3A%2F%2Frr1.googlevideo.com%2Fvideoplayback&s=a&s=b",
+            "url=https%3A%2F%2Frr1.googlevideo.com%2Fvideoplayback&s=a&sp=n",
+        ] {
+            let raw = json!({"streamingData":{"adaptiveFormats":[{"mimeType":"audio/mp4","signatureCipher":cipher}]}});
+            let error = collect_audio(&raw).err().unwrap().to_string();
+            assert!(!error.contains("private"));
+        }
     }
 
     #[test]
@@ -577,15 +725,5 @@ mod tests {
         ] {
             assert!(media_url(url).is_err(), "{url}");
         }
-    }
-
-    #[test]
-    fn player_timestamp_is_discovered_without_javascript_execution() {
-        assert_eq!(
-            timestamp(r#"ytcfg.set({"STS":20702,"next":true});"#),
-            Some(20702)
-        );
-        assert_eq!(timestamp(r#"{"STS":0}"#), None);
-        assert_eq!(timestamp("consent page"), None);
     }
 }

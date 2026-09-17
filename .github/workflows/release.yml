@@ -34,7 +34,7 @@ jobs:
         run: |
           mkdir -p dist/package
           cp README.md LICENSE dist/package/
-          cp -r include docs examples dist/package/
+          cp -r include docs examples vendor dist/package/
           if [[ "$RUNNER_OS" == Windows ]]; then
             cp target/release/ytmusic.exe target/release/youtube_music_core.dll dist/package/
             target/release/ytmusic.exe --version

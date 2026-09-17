@@ -1,11 +1,11 @@
 //! Native, blocking YouTube Music client. No browser, Python, or yt-dlp runtime.
 pub mod auth;
 mod client;
+mod decipher;
 mod error;
 mod ffi;
 pub mod library;
 pub mod model;
-pub mod oauth;
 pub mod parse;
 mod playback;
 
@@ -124,8 +124,13 @@ pub fn core_call(input: &str) -> String {
         request: Request,
     }
     let result = (|| {
-        let call: Call = serde_json::from_str(input)
-            .map_err(|_| Error::InvalidInput("expected {config?, request:{op,...}}".into()))?;
+        let call: Call = serde_json::from_str(input).map_err(|error| {
+            Error::InvalidInput(if error.to_string().contains(auth::LEGACY_AUTH_MESSAGE) {
+                auth::LEGACY_AUTH_MESSAGE.into()
+            } else {
+                "expected {config?, request:{op,...}}".into()
+            })
+        })?;
         call.request.validate()?;
         MusicClient::new(call.config)?.execute(call.request)
     })();

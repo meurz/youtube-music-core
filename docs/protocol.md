@@ -1,109 +1,140 @@
-# Protocol and validation
+# Web protocol and validation
 
 ## Transport
 
-The client bootstraps `https://music.youtube.com/` using a desktop browser User-Agent and reads the public `INNERTUBE_CLIENT_VERSION` and `VISITOR_DATA` configuration. Observed WEB_REMIX version on 2026-09-16: `1.20260913.16.00`. The version is discovered at runtime, not compiled into the library.
+Version 0.5 uses `WEB_REMIX` for every Innertube operation. It does not send TV,
+Android Music, or Android VR requests, even as a playback fallback. The service is
+YouTube's official Web backend; this library itself is unofficial.
 
-Catalog POST requests go to `https://music.youtube.com/youtubei/v1/{endpoint}?prettyPrint=false`, with JSON `context.client` fields `clientName=WEB_REMIX`, `clientVersion`, `hl`, `gl`, and optional `visitorData`. Headers include Origin/Referer and client number `67`. These endpoints accepted requests without an API key during validation. Audio resolution additionally uses the anonymous Android VR player endpoint described below.
+The core discovers `INNERTUBE_CLIENT_VERSION` and `VISITOR_DATA` from
+`https://music.youtube.com/`. API requests use the fixed origin
+`https://music.youtube.com/youtubei/v1/`, client number 67, and a JSON client
+context containing WEB_REMIX, the discovered version, language, and country.
+Client versions are not compiled into the library.
 
-| Operation | Endpoint | Main request fields |
+| Operation | Endpoint | Main fields |
 | --- | --- | --- |
-| Account verification | `account/account_menu` | Context with selected account |
-| Personal library | `browse` | Library browseId and optional continuation |
-| Search | `search` | `query`, optional filter `params` |
-| Album / artist / playlist | `browse` | `browseId` (playlist IDs gain `VL`) |
-| Pagination | Original endpoint | `continuation` |
-| Song / player / stream | `player` | Profile-specific context, `videoId`, content checks; WEB_REMIX also uses signature timestamp and optional `serviceIntegrityDimensions.poToken` |
-| Queue | `next` | `videoId`, audio-only/persistent-panel flags; follows one returned automix playlist endpoint |
-| Lyrics | `next`, then `browse` | Finds the selectable lyrics tab and uses its `browseId` |
+| Account | `account/account_menu` | Selected Web account context |
+| Library / browse / playlist | `browse` | `browseId`, optional continuation |
+| Search | `search` | Query and optional filter parameters |
+| Pagination | Original endpoint | Continuation token |
+| Song / player / stream | `player` | Video ID, signature timestamp, content checks |
+| Queue | `next` | Video ID; follows one automix playlist endpoint |
+| Lyrics | `next`, then `browse` | Selectable lyrics tab's browse ID |
 
-The parser recognizes responsive rows, two-row cards, queue videos, shelf/carousel/grid containers, and their continuations. Per-section continuation tokens are preserved. Missing optional fields are `null` or empty arrays. An empty recognized page is valid; a response without page contents is a protocol error. Layouts are private API contracts and may change.
+Responsive rows, two-row cards, queue videos, shelf/carousel/grid containers and
+per-section continuation tokens are supported. Unknown page/library layouts are
+errors, not empty libraries. The six library browse IDs distinguish saved songs
+(`FEmusic_liked_videos`) from likes (`VLLM`), and library artists
+(`FEmusic_library_corpus_track_artists`) from subscriptions
+(`FEmusic_library_corpus_artists`). Every library call verifies the selected
+account first.
 
-## Authentication and playback boundary
+## Browser session import
 
-Optional Cookie headers are attached per request only to the fixed music origin. `SAPISID` (or a secure PAPISID fallback) signs `timestamp + space + cookie_value + space + origin` with SHA-1 to build `SAPISIDHASH`. Authorization is refreshed on every request. Header values are marked sensitive in the HTTP library. Config parsing errors do not echo submitted credentials. The shared HTTP transport has no default Cookie or Authorization header, so anonymous VR, watch-page bootstrap, and media requests do not inherit account credentials.
+`auth login` opens Google's official sign-in page and returns import guidance.
+A regular browser does not automatically hand its Cookies to the core.
+`auth import --browser-port PORT` captures an already signed-in Music session;
+`auth login --browser-port PORT` waits for sign-in/MFA. Header files, stdin and
+Netscape exports remain supported. No account password or OAuth client is needed.
 
-Browser-session sign-in and personal library reads are authenticated-session verified in 0.3.0. The CLI can import request headers or capture an exact same-origin request through an explicitly enabled local Chromium debugging port, then verify and securely save the session. 0.4.0 additionally supports the official TV device OAuth flow described below. There is no password handling, PO-token generation, player JS interpreter, DRM handling, or yt-dlp subprocess. Account library mutations, downloads, and audio decoding are outside this release.
+The CDP bridge reads the exact Cookie header on a uniquely identified, harmless
+same-origin `/generate_204` request. This preserves partitioned cookie ordering.
+It verifies that the selected account did not change during capture. It does not
+read unrelated sites or password databases. CDP HTTP/WebSocket connections are
+restricted to the selected loopback port and bypass proxies.
 
-`player` separates metadata from playability: song metadata may remain available even when the player is blocked. Only HTTPS audio URLs without an `n` challenge are exposed as candidates. Cipher-only and n-challenged formats increment `unresolved_audio_formats`. `player` does not probe URLs; `stream` does. If every profile fails, `stream_unavailable` includes profile/format diagnostics without signed URLs. Private-track playback remains unverified.
+The imported account is remotely verified before storage. Linux/WSL uses `pass`;
+Windows/macOS use a random key in the OS credential store and an AES-GCM encrypted
+session file. Writes are atomic, profiles are authenticated as associated data,
+and decryption errors do not silently fall back to anonymous access. Logout
+removes only the selected local profile. Existing browser profiles are compatible;
+old OAuth grants return an explicit Cookie-import instruction.
 
-## Official TV device authorization — 0.4.0
+## Credential boundaries
 
-The core discovers the script marked `base-js` on `https://www.youtube.com/tv` using the Cobalt User-Agent, then parses its current public client ID/secret configuration without executing JavaScript. Script URLs remain restricted to the YouTube HTTPS origin. No static official client credentials are committed.
+Only fixed Music-origin requests receive Cookies and `SAPISIDHASH`. The signature
+is regenerated for each API request from the timestamp, signing cookie and Music
+origin. `x-goog-authuser` and optional `x-goog-pageid`/`onBehalfOfUser` retain the
+selected account/channel. Conflicting signing Cookies are rejected.
 
-It POSTs to `https://www.youtube.com/o/oauth2/device/code` with the TV client ID, a random device UUID, `device_model=ytlr::`, and the TV scopes `http://gdata.youtube.com https://www.googleapis.com/auth/youtube-paid-content`. The displayed verification URL must be Google's HTTPS `/device` page. The device code/client parameters stay private; only the user-facing verification URL/code are displayed.
+The shared HTTP transport has no default account headers. Static player downloads
+and CDN probes receive no account credentials. API and script redirects are
+rejected. Account/Cookie input and upstream JavaScript errors are not printed.
+`--anonymous` bypasses stored profiles and clears configured account/visitor data.
 
-Polling uses `/o/oauth2/token` with the TV device grant. Authorization pending, slowdown, refusal, expiry, invalid clients, and revoked grants are distinguished without echoing server-provided secret-bearing error text. The CLI honors the polling interval and bounded lifetime. A completed Google grant is encrypted in the selected profile before Music account verification; API rejection is reported explicitly, and the grant remains available for diagnosis.
+Cookie sessions can expire or be revoked. There is no OAuth refresh grant and no
+guaranteed independent Cookie renewal. Re-import a current browser session after
+authentication rejection. The browser is not required for subsequent API calls or
+stream resolution.
 
-OAuth account and library requests use the TVHTML5 context and sensitive Bearer headers on `www.youtube.com`. The TV client version is discovered dynamically from the TV homepage. Account verification uses the selected, enabled `accountItem` in `account/accounts_list`. TV tokens were accepted with this client and rejected with WEB_REMIX (HTTP 400); they are never attached to WEB_REMIX requests. Cookie and OAuth configurations cannot be combined. Public search/queue/lyrics, Android VR, and CDN transports remain anonymous with an OAuth profile. Access tokens refresh when less than 60 seconds remain; refreshed state is available to Rust hosts and is persisted by the CLI only when changed. Browser profiles from 0.3.0 still deserialize unchanged. C hosts can supply an OAuth session in config; persistent Rust clients expose the updated session to the host's secure store.
+## Web audio resolution
 
-Live validation on 2026-09-16/17: native Rust discovered the current official TV identity, printed `https://www.google.com/device` and its code, and received access/refresh tokens after user consent. Account identity matched the existing browser profile. The TV library returned 22 playlists (including automatic Mixes and ordinary YouTube playlists), 15 likes, 16 subscriptions, and an explicit empty albums state. Two playlist contents were read successfully. Forced token expiry triggered a real refresh and persisted the changed access token/new expiry, with authenticated status afterward. Public search returned 20 songs and M4A streaming returned VR HTTP 206. One initial request had a transient transport error; subsequent requests succeeded.
+The Music watch page identifies the official player script. Script URLs must use
+HTTPS port 443 on `music.youtube.com` or `www.youtube.com`, under `/s/player/`,
+ending in `/base.js`. Credentials, query strings, fragments, alternate hosts and
+redirects are rejected. The signature timestamp comes from that same script,
+which is cached per `MusicClient`. Prepared player code is also retained in a
+bounded in-memory cache for reuse across calls; it contains no account credentials
+or track challenges. A fresh process still performs the initial script analysis.
 
-TV cards are normalized without their menus, unselected tabs are ignored, and action tiles without media/browse IDs are removed. Playlist list renderers and continuation tokens are preserved. The TV client does not expose saved-library songs or library artists with the same meaning as WEB_REMIX; those two sections explicitly require browser authentication. Library sets/metadata can differ from the Music web app. The TV project's YouTube Data API v3 is disabled, so v3 is not used as a substitute. Multi-account selection and real continuation remain untested for OAuth; corresponding parsing/selection/credential isolation have offline tests. No account identity, private playlist IDs, client secrets, device codes, or tokens are committed.
+Audio `signatureCipher` and `n` challenges are resolved together by a pinned
+vendored yt-dlp-ejs AST solver in embedded QuickJS. No yt-dlp, Node, Python,
+standalone JS engine, or browser subprocess is invoked. The runtime exposes no
+network/filesystem/process/host callbacks and applies input, memory, stack and
+execution limits. Player source is untrusted; raw script errors and challenge
+values do not appear in errors. See `vendor/` for versions, hashes and licenses.
+The generated media URL retains the transformed `n` parameter. Direct raw
+parser calls still reject unresolved `n` challenges.
 
-## Account and library — 0.3.0
+`player` preserves metadata on transform failure and reports a sanitized
+`resolution_error`; unresolved URLs remain excluded. It resolves candidates without
+CDN probing; `stream` verifies formats by
+descending bitrate while honoring `any`, `mp4` or `webm`. Media URLs must use
+HTTPS port 443 on Google video CDN hosts and `/videoplayback`. Each probe requests
+at most the initial 4 KiB, checks HTTP 200/206, content type, Content-Range and
+WebM/MP4 container bytes. URLs expiring within 30 seconds are rejected. Up to
+eight formats and three CDN redirects per format are allowed; account credentials
+are never forwarded. A successful initial probe does not guarantee full playback.
 
-The core accepts a `BrowserSession` and exposes account verification, auth status, and six read-only library sections. Cookie presence is insufficient: `account/account_menu` must return an `activeAccountHeaderRenderer`. Explicit logged-out responses and HTTP 401/403 become authentication rejection; unexpected layouts remain protocol errors. `x-goog-authuser` chooses the Google account index. Optional brand/channel selection adds `x-goog-pageid` and `context.user.onBehalfOfUser`. The CLI captures these from the selected Music tab and verifies that selection is unchanged during import.
+## Limits and validation
 
-Library browse IDs are `FEmusic_liked_playlists`, `VLLM`, `FEmusic_liked_videos`, `FEmusic_liked_albums`, `FEmusic_library_corpus_track_artists`, and `FEmusic_library_corpus_artists`. Liked songs and saved library songs are distinct. Each library page verifies the account first, retains section continuations (including `gridContinuation`), and removes action tiles without dropping the first real playlist. Recognized empty-state messages are accepted; unknown empty layouts are errors.
+The Web API and player can change upstream. Region/account restrictions or
+additional attestation may block playback. PO-token generation, SABR transport,
+DRM, library writes, downloads and audio decoding are not implemented. Hosts own
+playback, later CDN errors, IP-bound URL handling, seeking and re-resolution.
+API responses are bounded to 16 MiB. Timeouts apply per request; no automatic
+transport retry is performed.
 
-The CLI reads the Cookie header from a unique same-origin `/generate_204` request through `Network.requestWillBeSentExtraInfo`, matching both request ID and URL regardless of event order. This preserves actual browser partitioned-cookie selection; combining `Network.getCookies` entries was ambiguous for duplicate preferences. Conflicting signing-cookie duplicates are rejected. CDP HTTP/WebSocket access is restricted to the selected loopback port and bypasses proxies. Login/MFA stays in the browser.
+Offline tests cover Web-only routing, Cookie/account isolation, legacy-profile
+migration, encrypted storage, callback-free login guidance, parser pagination,
+AST transforms, runtime interruption/host isolation, script/CDN origin validation,
+malformed ciphers and media byte limits. Tests use synthetic or reduced public
+fixtures; personal library results, credentials and audio are not committed.
+### Live validation — 2026-09-17
 
-Session persistence is a host concern. The CLI uses `pass` on Linux, or a system credential-backed AES-256-GCM vault on Windows/macOS. The key is random and stored separately from the encrypted file, avoiding Windows credential-size limits. Nonces are random, the profile is authenticated as associated data, writes replace atomically, and decryption failures are explicit. Import saves only after remote verification. Logout deletes the local selected profile. API/library calls do not require the browser after import; expired sessions need re-import.
+Using the signed-in Windows browser session imported into encrypted Linux storage:
 
-Live validation on 2026-09-16 used a signed-in Windows Chrome tab through CDP and the native WSL/Linux CLI. Verified import, encrypted `pass` storage, a fresh-process auth status/account lookup, all six library sections, and contents of three returned playlists. The account returned 8 playlists, 13 likes, 3 saved songs, 5 library artists, and 16 subscriptions. Albums returned the explicit “No albums yet” empty state. No account identity, playlist names/IDs, cookies, or private response fixtures are committed. Account-backed search returned 20 songs; account-backed default streaming and explicit anonymous M4A streaming both used anonymous VR and returned HTTP 206.
+- Verified account; 8 playlists, 3 saved songs, 5 library artists, 16 subscriptions,
+  13 likes, and explicit empty albums. Three returned playlist pages loaded.
+- All six search filters, album and artist pages, lyrics (3,432 characters), queue
+  and queue continuation passed. Song search returned 20 items and another 20 on
+  its continuation page. No personal library continuation was available to test.
+- The optimized native CLI and C ABI verified the account and saved songs. Web
+  audio returned `WEB_REMIX`: M4A itag 141, Opus itag 774, and a Japanese track's
+  Opus itag 774 each passed HTTP 206 / 4 KiB probes. Each 256 KiB sample decoded
+  for one second with FFmpeg exit 0. FFmpeg is validation-only.
+- In one C ABI process, first M4A resolution took 22.57 seconds including player
+  preparation; subsequent WebM and Japanese-track calls took 5.56 and 4.09 seconds.
+  The cache is in-memory only: separate CLI processes repeat cold preparation.
+  These timings describe this machine/network, not a performance guarantee.
+- A stale browser profile was rejected explicitly; re-importing the current
+  browser session restored authenticated status and all account reads. Cookie
+  import was then selected as the local default.
+- 59 offline tests, fmt and clippy passed. One private-capture test is ignored in
+  CI and was run separately against the observed official player. Linux, Windows
+  and macOS CI all passed.
 
-The tested account had no library continuation, so library pagination is covered offline. Multi-account/brand request selection and credential isolation are covered offline; only the currently selected real account was exercised. Windows/macOS vault code is compiled/tested by CI; live OS keychain integration requires a desktop session. No automatic session renewal or account-library write operations are implemented.
-
-## Native streaming — 0.2.0
-
-The first release's generic `UNPLAYABLE` response did not prove that all player profiles were blocked. Two request-level differences resolved it:
-
-1. WEB_REMIX requires `playbackContext.contentPlaybackContext.signatureTimestamp`. The watch page's public `STS` value was `20702` during validation. Discovering that value changed the same song's web player response from `UNPLAYABLE` to `OK`, with four ciphered audio formats. The timestamp is discovered dynamically and cached for the client lifetime.
-2. The native `ANDROID_VR` profile returned direct URLs when its version, User-Agent, and device context matched. The tested version is `1.65.10`, client number `28`, device `Oculus / Quest 3`, Android SDK `32`, OS `Android / 12L`. Its User-Agent is `com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip`. Requests go to `https://www.youtube.com/youtubei/v1/player`. This profile needs no JavaScript execution, signature timestamp, account cookie, or generated PO token for the public tracks tested. Client compatibility can change upstream.
-
-Automatic mode tries VR first and then WEB_REMIX. `player` returns the first OK response with direct candidates; if none exists it retains inspection metadata. `stream` checks each profile's candidates by bitrate, honoring `any` / `mp4` / `webm`. The selected profile appears in both player and audio results. URLs whose declared expiry is within 30 seconds are rejected.
-
-Each media probe requests `Range: bytes=0-4095` with the returned public User-Agent. It accepts HTTP 200/206, checks content type, validates the initial Content-Range when present, reads at most 4 KiB, and checks WebM EBML or MP4 `ftyp` bytes. A broken URL or unsupported container is skipped. There are at most eight candidate formats per profile and three redirects per candidate. Initial and redirect URLs must use HTTPS port 443, the Google video CDN domain, and `/videoplayback`; cookies are never forwarded. Error pages, malformed/truncated ranges, unexpected redirects, and container mismatches fail validation.
-
-The probe establishes that the beginning of the audio is accessible. Hosts still own decoding, seeking, later CDN errors, and re-resolution after URL expiry. Streaming requires the same effective network path when URLs are IP-bound; use the configured proxy consistently in the host.
-
-### Live streaming validation — 2026-09-16
-
-| Probe | Observed result |
-| --- | --- |
-| `4D7u5KF7SP8`, WebM | ANDROID_VR, itag 251, Opus, HTTP 206, 4,096 verified bytes |
-| `4D7u5KF7SP8`, MP4 | ANDROID_VR, itag 140, AAC/M4A, HTTP 206, 4,096 verified bytes |
-| `5NV6Rdv1a3I`, music video audio | ANDROID_VR, itag 251, HTTP 206 |
-| `m9SMT5ipbxk`, Japanese song | ANDROID_VR, itag 251, HTTP 206 |
-| WEB_REMIX inspection | OK with four unresolved ciphered audio formats after timestamp discovery |
-| Real media decode | 256 KiB samples of Opus, M4A, and Japanese audio each decoded for one second; FFmpeg exit 0 |
-
-One initial homepage request encountered a transient transport error; repeating the request succeeded. Transport retries are not implemented. Typical successful resolution in this environment took roughly 1.4–1.6 seconds including bootstrap, player request, and CDN probe. Timing is observational, not a performance guarantee. No signed media URLs, cookies, or audio samples are committed. FFmpeg is only a validation tool.
-
-The 25 offline tests include high-bitrate failure fallback, strict container selection, media response limits, malformed/truncated ranges, error pages, expired URLs, redirect host restrictions, and credential isolation.
-
-## Original catalog validation — 0.1.0, 2026-09-16
-
-Performed using the compiled Rust CLI from WSL/Linux, anonymous session, default `en` / `US` request context. YouTube selected the actual region based on network conditions; the country field does not override geolocation.
-
-| Probe | Observed result |
-| --- | --- |
-| Songs: `Daft Punk Get Lucky` | 20 items; first song `4D7u5KF7SP8`, duration 370 s, three artist links, album `MPREb_K8qWMWVqXGi` |
-| Videos / albums / playlists filters | 20 items each |
-| Artists: `Daft Punk` | 10 items |
-| Unfiltered: `Daft Punk` | 32 items |
-| Search continuation | 20 additional items |
-| Album browse | `Random Access Memories`; 24 total catalog cards across tracks and recommendations |
-| Artist browse | `Daft Punk`; eight sections, 75 total cards |
-| Playlist browse | Public playlist returned its title and 32 items |
-| Song details | Correct title, artist/channel, 370 s duration, thumbnails |
-| Queue / automix | 50 tracks |
-| Queue continuation | 49 tracks |
-| Lyrics | Nonempty plain text, 3,432 characters; copyrighted lyrics are not stored in the repository |
-| Player | `UNPLAYABLE`, reason `Video unavailable`; metadata remains available |
-| Stream | JSON `unplayable` error, exit 1; no playable URL claimed |
-
-Reduced public search, queue, and blocked-player responses are in `tests/fixtures/`. Visitor IDs, response context, menus, and tracking fields were removed. Lyrics tests use invented two-line text. Offline tests cover durations, links, renderer variants, per-section tokens, unsupported stream challenges, structured errors, bootstrap string decoding, Cookie hashing, and C ABI ownership/invalid inputs.
-
-Build checks: formatting, clippy with warnings denied, 14 offline tests, optimized CLI/shared-library build, and a native C host invoking the shared library. Cross-platform validation and release artifacts are recorded in GitHub Actions.
+These observations cover the tested account, region and tracks, not every account
+or full-track playback. No private results, signed URLs, credentials or audio
+samples are published.

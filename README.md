@@ -1,8 +1,8 @@
 # YouTube Music Core
 
-Native Rust client for YouTube Music's unofficial Innertube API. Includes a reusable blocking library, the `ytmusic` JSON CLI, and a C ABI for native application hosts. Catalog and streaming require no browser, Node.js, Python, or yt-dlp runtime. Account access supports official TV device authorization or an existing Music browser session; subsequent API calls run directly in Rust.
+Native Rust client for YouTube Music's unofficial Web Innertube API. Includes a reusable blocking library, the `ytmusic` JSON CLI, and a C ABI for native application hosts. Sign in on Google's official website and import the Music browser session; all subsequent API calls and audio resolution run locally without a browser, Node.js, Python, or yt-dlp process.
 
-**Status: experimental 0.4.0.** Catalog access and audio streaming work anonymously where YouTube permits them. The native Android VR player profile supplies direct Opus/WebM and AAC/M4A audio; `stream` verifies a small CDN byte range before returning a URL. Player JavaScript signature/n deciphering and PO-token generation are not implemented. Account, region, and anti-bot restrictions may still block a track. See [validation and limitations](docs/protocol.md).
+**Status: experimental 0.5.0.** Search, browsing, accounts, all six library categories, lyrics, queues, and playback use `WEB_REMIX`. Web audio signatures and `n` parameters are resolved by a bounded embedded QuickJS engine using a pinned player parser. No TV, Android, or VR fallback is used. Google can change its private protocol or require additional playback attestation. See [validation and limitations](docs/protocol.md).
 
 ## Install
 
@@ -11,7 +11,7 @@ Download an archive for Linux, macOS, or Windows from [Releases](https://github.
 With Rust 1.91 or newer:
 
 ```sh
-cargo install --git https://github.com/meurz/youtube-music-core --tag v0.4.0 --locked
+cargo install --git https://github.com/meurz/youtube-music-core --tag v0.5.0 --locked
 ytmusic search 'Daft Punk Get Lucky' --filter songs --pretty
 ```
 
@@ -43,25 +43,19 @@ All operation output is JSON on stdout:
 ```
 
 Failures use `{"ok":false,"error":{"code":"stream_unavailable","message":"..."}}` and exit code 1.
-CLI argument errors use clap's stderr help and exit code 2. Result arrays contain actual IDs, never display indices. The `player` command succeeds when it can inspect a player response, even if `status` is `UNPLAYABLE`. `stream` succeeds only after a media probe succeeds.
+CLI argument errors use clap's stderr help and exit code 2. Result arrays contain actual IDs, never display indices. The `player` command preserves track metadata even when `status` is `UNPLAYABLE` or URL transforms fail; `resolution_error` reports a sanitized transform failure and unresolved formats stay excluded. `stream` succeeds only after a media probe succeeds.
 
 ### Account login and personal library
 
-Run the CLI to get an official Google device-authorization link and code:
+Sign in at the official Music website and import its browser session. No OAuth application, Google Cloud project, device code, or localhost login page is required.
 
 ```sh
 ytmusic auth login --no-open
-# Open https://www.google.com/device and enter the displayed code.
-# Select your account and approve the device access shown by Google.
-ytmusic auth status
-ytmusic library playlists --pretty
+# Open the returned Google login_url and sign in.
+# Import the signed-in Music session using one of the methods below.
 ```
 
-`auth login` discovers the current client identity from YouTube TV's public bootstrap script and uses YouTube's device-code/token endpoints. No Google Cloud project, personal OAuth client configuration, localhost page, or Cookie copying is required for this mode. Google may label the device as YouTube on TV. Only approve the code printed by the CLI session you started. The verification link and user code go to stderr; stdout contains the final JSON result. Omit `--no-open` to open the official page automatically. The CLI waits up to the code's lifetime (normally 30 minutes); `--wait-seconds` can shorten the wait.
-
-Google-issued access/refresh tokens are saved in the selected secure profile after authorization. The CLI then verifies the Music account. If that final check fails, the grant stays saved so `auth status` can diagnose API compatibility without another consent step. Access tokens refresh before expiry, and the CLI persists changed tokens securely. Revoked refresh tokens require another login. An official TV grant's compatibility with Music's private API is controlled by YouTube and may change; successfully displaying a code alone does not prove library access works.
-
-Browser import remains available as an alternative. Authentication and account/library APIs belong to the core; browser integration and persistence belong to the CLI/host.
+`auth login` opens Google's official sign-in page and returns import instructions; it does not claim that opening the page has authenticated the CLI. Login/MFA remains in your browser. The core handles Cookie authentication, account verification, and all Web API calls; browser integration and encrypted storage belong to the CLI or host.
 
 With Chrome/Edge already exposing a **local** debugging port and a signed-in Music tab:
 
@@ -98,15 +92,17 @@ Use `--profile personal` for separate accounts and `--store auto|pass|keyring` t
 | `artists` | Artists in the library |
 | `subscriptions` | Subscribed artists |
 
-TV OAuth supports `playlists`, `likes`, `albums`, and `subscriptions`, plus playlist/browse pagination. Its music library can include automatic Mixes and regular YouTube playlists/videos that the web Music client omits. `songs` (saved library songs) and `artists` (library artists) require a browser profile; OAuth returns an explicit unsupported-section error. Public search, queues, lyrics, and playback continue to use anonymous clients with an OAuth profile. Browser profiles retain their existing account-backed web behavior.
+All six sections use the selected Music Web account. Use a returned `browse_id` with `browse`, or a playlist ID with `playlist`. Fetch library pages with `ytmusic library playlists --continuation 'TOKEN'` (retain the original section). Each library call verifies `account/account_menu`; rejected sessions cannot masquerade as empty libraries. This release provides read-only library access.
 
-Use a returned `browse_id` with `browse`, or a playlist ID with `playlist`. Fetch library pages with `ytmusic library playlists --continuation 'TOKEN'` (retain the original section). Each library call verifies the selected account (`account/accounts_list` for TV OAuth); rejected sessions cannot masquerade as empty libraries. This release provides read-only library access. Browser/credential-store integration stays in the CLI or your application host.
+**Upgrading from 0.4:** existing browser profiles still work. TV OAuth profiles are not convertible to browser sessions and now return an explicit import instruction; run `ytmusic auth import --browser-port 9222` or import browser headers into the same profile. The import replaces the selected profile only after account verification. Rust OAuth APIs and the `android_vr` playback setting were removed; migrate hosts to `BrowserSession` and `web_remix`/`auto` (both Web-only).
 
 ### Audio streaming
 
-`stream` tries the anonymous `ANDROID_VR` profile first, then `WEB_REMIX`. Within each profile it checks audio formats by descending bitrate, skipping broken CDN URLs. `--format mp4` selects AAC/M4A for hosts that cannot play Opus/WebM; `--format webm` selects Opus. The default is `any`. A requested container is never silently changed.
+`stream` uses the official Music Web player. It discovers the current player script and its signature timestamp, resolves the returned signature/`n` challenges in a restricted embedded engine, then checks audio formats by descending bitrate. `--format mp4` selects AAC/M4A; `--format webm` selects Opus. The default is `any`. A requested container is never silently changed.
 
-The result includes `url`, `itag`, `mime_type`, `bitrate`, `content_length`, `expires_at` (Unix seconds), `source_client`, and `http_headers`. Pass those public headers along with the URL to your media player. No account cookies are included. `verification` records the HTTP status, bytes read, and content type of a successful probe. The core reads at most 4 KiB per probe and checks the byte range and container header. URLs can expire or be tied to the requesting IP; resolve again after expiry or a later playback failure. A successful initial probe does not guarantee the entire track will remain available.
+The result includes `url`, `itag`, `mime_type`, `bitrate`, `content_length`, `expires_at` (Unix seconds), `source_client`, and `http_headers`. Pass those playback headers along with the URL to your media player. No account cookies are included. `verification` records the HTTP status, bytes read, and content type of a successful probe. The core reads at most 4 KiB per probe and checks the byte range and container header. URLs can expire or be tied to the requesting IP; resolve again after expiry or a later playback failure. A successful initial probe does not guarantee the entire track will remain available.
+
+First use analyzes the current player script and can take tens of seconds. The process caches up to two prepared scripts, making subsequent calls faster; separate CLI invocations repeat that initial work. Reuse the Rust client or keep the shared library loaded for repeated playback.
 
 `player` exposes candidate formats without CDN probing; their `verification` field is `null`. Use `stream` when handing a URL to a player. This release was tested with real Opus and M4A CDN responses and one-second audio decoding; FFmpeg was used for validation only and is not a runtime dependency.
 
@@ -128,10 +124,14 @@ Use `--config /path/to/config.json` or `YTMUSIC_CONFIG`. All fields are optional
 }
 ```
 
-Additional fields: `proxy` (HTTP/SOCKS URL), `cookie` (raw Cookie header), `oauth` (host-supplied OAuthSession), `visitor_data`, `po_token`, `client_version`, `auth_user` (default 0), `delegated_session_id` (optional brand/channel ID), `playback_client` (`auto`, `android_vr`, or `web_remix`; default `auto`).
-Prefer `auth import` for secure credential storage. Legacy config cookies require a private file outside the repository; never put them in command arguments. Config cookie input is a header string, not a Netscape file. Cookies and externally supplied PO tokens apply to WEB_REMIX; Android VR is always anonymous. Set `playback_client` to `web_remix` to inspect the account-backed web player specifically. Account verification and personal library reads were tested with a real browser session. Multi-account/brand selection has offline coverage; externally supplied PO tokens and private-track playback remain unverified. Cipher-only web formats still fail with an explicit signature/attestation diagnostic.
+Additional fields: `proxy` (HTTP/SOCKS URL), `cookie` (raw Cookie header), `visitor_data`, `po_token`, `client_version`, `auth_user` (default 0), `delegated_session_id` (optional brand/channel ID), `playback_client` (`auto` or `web_remix`; both use Web).
+Prefer `auth import` for secure credential storage. Config cookies require a private file outside the repository; never put them in command arguments. Config cookie input is a header string, not a Netscape file. Old nonempty `oauth`/`music_oauth` configuration is rejected with a migration instruction.
 
-The client obtains the current WEB_REMIX client version and visitor data from the homepage. Set `client_version` explicitly when bootstrap is blocked. WEB_REMIX player requests additionally discover the signature timestamp from the watch page and cache it per client. API redirects are rejected; media probes allow up to three redirects, restricted to HTTPS Google video CDN URLs. Standard proxy environment variables are supported by reqwest. There are no transport retries; stream resolution falls back across up to eight formats per profile. The timeout is per HTTP request (bootstrap, profile fallback, and probes can take multiple timeouts). API responses are limited to 16 MiB.
+The client discovers the current WEB_REMIX version and visitor data from the Music homepage. `client_version` can override catalog bootstrap. Playback discovers the official player script from the Music watch page, downloads it without account headers, and caches it per client. Only official YouTube HTTPS player-script URLs are accepted. The embedded solver has no filesystem, network, process, or host callbacks and enforces time/memory/stack limits. Its pinned source and licenses are in [vendor](vendor/yt-dlp-ejs/README.md); it does not download replacement solver code at runtime.
+
+Cookies are sent only to the fixed Music origin; CDN requests have no account credentials. API/static-script redirects are rejected. Media probes allow at most three redirects restricted to HTTPS Google video CDN URLs, trying at most eight formats. API responses are limited to 16 MiB. There are no transport retries. Request timeouts apply per request; bootstrapping, player-script processing, and probes can take multiple timeouts. Standard proxy environment variables are supported; signed media URLs may be tied to the requesting IP.
+
+Cookie sessions can expire or be revoked. There is no OAuth refresh token or guaranteed independent Cookie renewal: re-import the current browser session when rejected. PO-token generation, DRM, SABR delivery, and account-library writes are not implemented. If Google requires additional attestation or changes the player layout, the core reports an error instead of switching to another client.
 
 ## Rust library
 
@@ -169,16 +169,16 @@ let playlists = client.library(LibrarySection::Playlists, None)?;
 # }
 ```
 
-`BrowserSession` Debug output is redacted, but serialization intentionally contains credentials for host-provided secure storage. Never log serialized sessions or `Config`. `oauth::DeviceAuthClient` exposes begin/poll to application hosts; `OAuthSession::apply_to` selects Bearer authentication and clears browser credentials. After API calls, hosts can retrieve refreshed state with `MusicClient::oauth_session()` for secure persistence. Rust `Config` literals must include the new `oauth` and `delegated_session_id` fields or use `..Default::default()`.
+`BrowserSession` Debug output is redacted, but serialization intentionally contains credentials for host-provided secure storage. Never log serialized sessions or `Config`. All account and playback operations use this same Web session. Reuse `MusicClient` to cache the player script and HTTP connections.
 
 ## C ABI / native hosts
 
 See [include/youtube_music_core.h](include/youtube_music_core.h) and [examples/ffi.c](examples/ffi.c).
 `ytmusic_core_call` accepts `{"config":{},"request":{"op":"search","query":"Daft Punk"}}` and returns an allocated UTF-8 JSON string. Release it exactly once with `ytmusic_string_free`. Do not use the host allocator. Calls are synchronous and each creates a client; use the Rust API for a persistent session.
 
-The CLI's `call` command accepts the inner `request` object; the C ABI accepts the wrapper with optional `config`. Account operations are `{"op":"auth_status"}`, `{"op":"account"}`, and `{"op":"library","section":"playlists","continuation":null}`. The C host supplies either `oauth` or browser `cookie`, `auth_user`, and optional `delegated_session_id` in `config` from its own secure store; the library does not implicitly load CLI profiles.
+The CLI's `call` command accepts the inner `request` object; the C ABI accepts the wrapper with optional `config`. Account operations are `{"op":"auth_status"}`, `{"op":"account"}`, and `{"op":"library","section":"playlists","continuation":null}`. The C host supplies browser `cookie`, `auth_user`, and optional `delegated_session_id` in `config` from its own secure store; the library does not implicitly load CLI profiles.
 
-Streaming through the C ABI uses `{"request":{"op":"stream","video_id":"4D7u5KF7SP8","format":"mp4"}}`. The `format` field is optional. Existing JSON requests continue to work. Rust callers constructing `Request::Stream` must now include `format`; parsed `AudioStream` and `Player` records have additional fields in 0.2.0.
+Streaming through the C ABI uses `{"request":{"op":"stream","video_id":"4D7u5KF7SP8","format":"mp4"}}`. The `format` field is optional. Existing JSON requests continue to work. Rust callers constructing `Request::Stream` include `format`.
 
 ## Development
 
