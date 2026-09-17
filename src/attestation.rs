@@ -20,7 +20,7 @@ pub enum PoTokenContext {
 }
 
 /// Secret material. Serialize only into host-controlled secure storage.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct PoTokenBundle {
     pub video_id: String,

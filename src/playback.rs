@@ -23,8 +23,9 @@ const EXPIRY_MARGIN_SECONDS: u64 = 90;
 const MAX_STREAM_CACHE: usize = 8;
 const MAX_PREFETCH: usize = 3;
 
+#[derive(Clone)]
 struct WebPlayerScript {
-    source: String,
+    source: Arc<String>,
     timestamp: u32,
     loaded_at: Instant,
     generation: u64,
@@ -50,6 +51,20 @@ impl PlaybackCache {
         self.generation = self.generation.wrapping_add(1);
         self.script = None;
         self.streams.clear();
+    }
+
+    pub(crate) fn invalidate_token_streams(&mut self, changed: &BTreeSet<String>) {
+        if changed.is_empty() {
+            return;
+        }
+        self.generation = self.generation.wrapping_add(1);
+        self.streams
+            .retain(|entry| !changed.contains(&entry.video_id));
+        // Old in-flight resolvers retain their old generation and cannot repopulate
+        // the cache. Public player code is independent of video/account proof.
+        if let Some(script) = &mut self.script {
+            Arc::make_mut(script).generation = self.generation;
+        }
     }
 
     fn stream(
@@ -371,7 +386,7 @@ impl MusicClient {
         let timestamp = crate::decipher::signature_timestamp(&source)
             .ok_or_else(|| Error::Protocol("Web player has no signature timestamp".into()))?;
         let script = Arc::new(WebPlayerScript {
-            source,
+            source: Arc::new(source),
             timestamp,
             loaded_at: Instant::now(),
             generation,
@@ -1071,10 +1086,93 @@ mod tests {
     }
 
     #[test]
+    fn proof_updates_preserve_public_code_and_only_invalidate_changed_videos() {
+        let client = MusicClient::new(crate::Config {
+            client_version: Some("offline.fixture".into()),
+            visitor_data: Some("visitor-cache-fixture".into()),
+            ..Default::default()
+        })
+        .unwrap();
+        let bundle = |id: &str| crate::attestation::PoTokenBundle {
+            video_id: id.into(),
+            player_token: None,
+            gvs_token: Some("g".repeat(100)),
+            expires_at: unix_now().unwrap() + 300,
+            session_binding: crate::attestation::visitor_binding("visitor-cache-fixture").unwrap(),
+        };
+        let first = bundle("QoXDQa9L12A");
+        let second = bundle("dQw4w9WgXcQ");
+        client.set_po_tokens(vec![first.clone()]).unwrap();
+        let old_script = {
+            let mut cache = client.playback_cache().unwrap();
+            let script = Arc::new(WebPlayerScript {
+                source: Arc::new("public player fixture".into()),
+                timestamp: 42,
+                loaded_at: Instant::now(),
+                generation: cache.generation,
+            });
+            cache.script = Some(Arc::clone(&script));
+            cache.insert(
+                &first.video_id,
+                AudioFormat::Any,
+                player().audio_streams.remove(0),
+            );
+            cache.insert(
+                &second.video_id,
+                AudioFormat::Any,
+                player().audio_streams.remove(0),
+            );
+            script
+        };
+        client
+            .set_po_tokens(vec![first.clone(), second.clone()])
+            .unwrap();
+        let new_script = {
+            let cache = client.playback_cache().unwrap();
+            let script = cache.script.as_ref().unwrap();
+            assert!(Arc::ptr_eq(&old_script.source, &script.source));
+            assert_eq!(old_script.loaded_at, script.loaded_at);
+            assert_ne!(old_script.generation, cache.generation);
+            assert_eq!(script.generation, cache.generation);
+            assert_eq!(cache.streams.len(), 1);
+            assert_eq!(cache.streams[0].video_id, first.video_id);
+            Arc::clone(script)
+        };
+        // Reordering identical bundles is a no-op; old failures must not flush new work.
+        client
+            .set_po_tokens(vec![second.clone(), first.clone()])
+            .unwrap();
+        client.invalidate_generation(old_script.generation).unwrap();
+        assert!(Arc::ptr_eq(
+            client.playback_cache().unwrap().script.as_ref().unwrap(),
+            &new_script
+        ));
+        let mut renewed = first.clone();
+        renewed.expires_at += 60;
+        client.set_po_tokens(vec![renewed, second]).unwrap();
+        assert!(client.playback_cache().unwrap().streams.is_empty());
+        {
+            let mut cache = client.playback_cache().unwrap();
+            cache.insert(
+                &first.video_id,
+                AudioFormat::Any,
+                player().audio_streams.remove(0),
+            );
+        }
+        client.set_po_tokens(vec![]).unwrap();
+        let cache = client.playback_cache().unwrap();
+        assert!(cache.streams.is_empty());
+        assert!(Arc::ptr_eq(
+            &cache.script.as_ref().unwrap().source,
+            &old_script.source
+        ));
+    }
+
+    #[test]
     fn invalidation_removes_signed_urls_and_advances_generation() {
         let mut cache = PlaybackCache {
             script: Some(Arc::new(WebPlayerScript {
-                source: String::new(),
+                source: Arc::new(String::new()),
                 timestamp: 1,
                 loaded_at: Instant::now(),
                 generation: 0,

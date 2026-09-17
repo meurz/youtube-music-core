@@ -93,9 +93,22 @@ impl MusicClient {
                     token.token_for(&token.video_id, PoTokenContext::Player, &binding, now)?;
                 }
             }
-            *crate::operation::lock(&self.po_tokens)? = tokens;
+            let mut previous = crate::operation::lock(&self.po_tokens)?;
+            let changed = previous
+                .iter()
+                .chain(tokens.iter())
+                .filter(|token| {
+                    previous.iter().find(|old| old.video_id == token.video_id)
+                        != tokens.iter().find(|new| new.video_id == token.video_id)
+                })
+                .map(|token| token.video_id.clone())
+                .collect();
+            // Keep the token lock until cache generations are advanced so another
+            // resolver cannot consume an old token with the new generation.
+            crate::operation::lock(&self.playback)?.invalidate_token_streams(&changed);
+            *previous = tokens;
+            drop(previous);
             drop(state);
-            self.invalidate_playback()?;
             Ok(())
         })
     }
