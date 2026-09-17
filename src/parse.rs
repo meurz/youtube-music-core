@@ -484,6 +484,9 @@ fn parse_player(v: &Value, resolved: bool) -> Result<Player> {
         else {
             continue;
         };
+        if crate::drm::is_encrypted_format(format) {
+            continue;
+        }
         // URLs with an n challenge are not ready for playback. Do not claim otherwise.
         let url = format["url"]
             .as_str()
@@ -517,6 +520,8 @@ fn parse_player(v: &Value, resolved: bool) -> Result<Player> {
     }
     audio_streams.sort_by_key(|s| std::cmp::Reverse(s.bitrate.unwrap_or(0)));
     Ok(Player {
+        sabr: crate::delivery::parse_sabr(v, resolved),
+        drm: crate::drm::parse_player_drm(v),
         source_client: None,
         track,
         status,

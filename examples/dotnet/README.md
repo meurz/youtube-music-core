@@ -172,3 +172,12 @@ The [offline smoke executable](../dotnet-smoke/README.md) exercises actual nativ
 interop through a local proxy sink, including cancellation, deadlines, progress
 observer failure, handle cleanup and disposal. It requires no account or external
 network access.
+
+## Optional official browser playback
+
+Use the [WebView2 project](web-player/README.md) for official-page Proof of Origin
+generation and licensed DRM playback. Its WinRT projection supports WinUI 3;
+WPF/WinForms hosts can build the managed projection. The native core remains
+independent of WebView2 for ordinary requests and permitted clear SABR delivery.
+See the [SABR handle API](../../docs/web-delivery.md) for native media segments;
+these need a host demuxer and are not ordinary MediaPlayer URLs.

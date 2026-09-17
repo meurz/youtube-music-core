@@ -33,6 +33,11 @@ jobs:
       - name: Build Windows adaptive playback example
         if: runner.os == 'Windows'
         run: dotnet build examples/dotnet/windows --configuration Release
+      - name: Build official WebView2 playback example
+        if: runner.os == 'Windows'
+        run: |
+          dotnet build examples/dotnet/web-player --configuration Release
+          dotnet build examples/dotnet/web-player --configuration Release -p:WebView2EnableCsWinRTProjection=false
       - name: Build Windows release candidate
         if: runner.os == 'Windows'
         run: cargo build --release --locked

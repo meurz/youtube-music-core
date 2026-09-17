@@ -27,6 +27,7 @@ pub struct Config {
     pub cookie: Option<String>,
     pub cookie_expirations: BTreeMap<String, i64>,
     pub po_token: Option<String>,
+    pub po_tokens: Vec<crate::attestation::PoTokenBundle>,
     pub proxy: Option<String>,
     pub timeout_seconds: u64,
     pub auth_user: u32,
@@ -44,6 +45,7 @@ struct ConfigFields {
     pub cookie: Option<String>,
     pub cookie_expirations: BTreeMap<String, i64>,
     pub po_token: Option<String>,
+    pub po_tokens: Vec<crate::attestation::PoTokenBundle>,
     pub proxy: Option<String>,
     pub timeout_seconds: u64,
     pub auth_user: u32,
@@ -62,6 +64,7 @@ impl Default for ConfigFields {
             cookie: config.cookie,
             cookie_expirations: config.cookie_expirations,
             po_token: config.po_token,
+            po_tokens: config.po_tokens,
             proxy: config.proxy,
             timeout_seconds: config.timeout_seconds,
             auth_user: config.auth_user,
@@ -100,6 +103,7 @@ impl Default for Config {
             cookie: None,
             cookie_expirations: BTreeMap::new(),
             po_token: None,
+            po_tokens: Vec::new(),
             proxy: None,
             timeout_seconds: 30,
             auth_user: 0,
@@ -113,6 +117,8 @@ pub struct MusicClient {
     pub(crate) http: Client,
     pub(crate) config: Config,
     pub(crate) playback: Mutex<crate::playback::PlaybackCache>,
+    pub(crate) sabr: Mutex<crate::delivery::Sessions>,
+    pub(crate) po_tokens: Mutex<Vec<crate::attestation::PoTokenBundle>>,
     pub(crate) session: Mutex<crate::session::CookieState>,
 }
 
@@ -229,12 +235,16 @@ impl MusicClient {
             config.cookie.take(),
             std::mem::take(&mut config.cookie_expirations),
         )?;
+        let po_tokens = std::mem::take(&mut config.po_tokens);
         let mut client = Self {
             http,
             config,
             session: Mutex::new(session),
             playback: Mutex::default(),
+            sabr: Mutex::default(),
+            po_tokens: Mutex::default(),
         };
+        client.set_po_tokens(po_tokens)?;
         if client.config.client_version.is_none() {
             let html = client.music_page("/")?;
             client.config.client_version = Some(config_string(&html, "INNERTUBE_CLIENT_VERSION").ok_or_else(|| Error::Protocol("web client bootstrap failed; provide client_version if consent or regional restrictions block the homepage".into()))?);

@@ -2,7 +2,7 @@
 
 Native Rust client for YouTube Music's unofficial Web Innertube API. Includes a reusable blocking library, the `ytmusic` JSON CLI, and a C ABI for native application hosts. Sign in on Google's official website and import the Music browser session; all subsequent API calls and audio resolution run locally without a browser, Node.js, Python, or yt-dlp process.
 
-**Status: experimental 0.7.0.** Search/suggestions, home/explore, accounts, all six library categories, library/playlist writes, lyrics, contextual queues, and playback use `WEB_REMIX`. Web audio signatures and `n` parameters are resolved by a bounded embedded QuickJS engine using a pinned player parser. No TV, Android, or VR fallback is used. Google can change its private protocol or require additional playback attestation. See [validation and limitations](docs/protocol.md).
+**Status: experimental 0.8.0.** Search/suggestions, home/explore, accounts, all six library categories, library/playlist writes, lyrics, contextual queues, and playback use `WEB_REMIX`. Web audio signatures and `n` parameters are resolved by a bounded embedded QuickJS engine using a pinned player parser. No TV, Android, or VR fallback is used. Google can change its private protocol or require additional playback attestation. See [validation and limitations](docs/protocol.md).
 
 ## Install
 
@@ -11,7 +11,7 @@ Download an archive for Linux, macOS, or Windows from [Releases](https://github.
 With Rust 1.91 or newer:
 
 ```sh
-cargo install --git https://github.com/meurz/youtube-music-core --tag v0.7.0 --locked
+cargo install --git https://github.com/meurz/youtube-music-core --tag v0.8.0 --locked
 ytmusic search 'Daft Punk Get Lucky' --filter songs --pretty
 ```
 
@@ -104,6 +104,8 @@ All six sections use the selected Music Web account. Use a returned `browse_id` 
 
 ### Audio streaming
 
+Version 0.8 adds [native SABR, official-browser PO tokens and licensed Web playback](docs/web-delivery.md). Windows hosts can use the additional [WebView2 helper](examples/dotnet/web-player/README.md).
+
 `stream` uses the official Music Web player. It discovers the current player script and its signature timestamp, resolves the returned signature/`n` challenges in a restricted embedded engine, then checks audio formats by descending bitrate. `--format mp4` selects AAC/M4A; `--format webm` selects Opus. The default is `any`. A requested container is never silently changed.
 
 The result includes `url`, `itag`, `mime_type`, `bitrate`, `content_length`, `expires_at` (Unix seconds), `source_client`, and `http_headers`. Pass those playback headers along with the URL to your media player. No account cookies are included. `verification` records the HTTP status, bytes read, and content type of a successful probe. The core reads at most 4 KiB per probe and checks the byte range and container header. URLs can expire or be tied to the requesting IP; resolve again after expiry or a later playback failure. A successful initial probe does not guarantee the entire track will remain available.
@@ -179,7 +181,7 @@ The client discovers the current WEB_REMIX version and visitor data from the Mus
 
 Cookies are sent only to the fixed Music origin; CDN requests have no account credentials. API/static-script redirects are rejected. Media probes allow at most three redirects restricted to HTTPS Google video CDN URLs, trying at most eight formats. API responses are limited to 16 MiB. Eligible reads retry network errors/timeouts and HTTP 429/502/503/504 at most three attempts, honoring server retry delays up to ten seconds. Writes never retry automatically. A total-operation deadline includes bootstrap, player work, retries and probes; the default is 120 seconds (`--timeout-ms` in the CLI), in addition to per-request timeouts. Native operation handles can cancel HTTP I/O, QuickJS execution and lock waits; CLI Ctrl+C requests cancellation. Standard proxy environment variables are supported; signed media URLs may be tied to the requesting IP.
 
-Music responses now update root-scoped Cookie values and expiry metadata. The CLI verifies changed sessions before saving them to its encrypted profile; `auth refresh` explicitly visits the Music homepage, verifies the account, and saves updates. A newer import or logout wins over a late automatic save. Normal command results remain available if background persistence fails, with a sanitized stderr warning; explicit refresh reports failure. This maintains an active session without a browser process, but cannot restore a revoked session: re-import when rejected. PO-token generation, DRM and SABR delivery are not implemented. If Google requires additional attestation or changes the player layout, the core reports an error instead of switching to another client.
+Music responses now update root-scoped Cookie values and expiry metadata. The CLI verifies changed sessions before saving them to its encrypted profile; `auth refresh` explicitly visits the Music homepage, verifies the account, and saves updates. A newer import or logout wins over a late automatic save. Normal command results remain available if background persistence fails, with a sanitized stderr warning; explicit refresh reports failure. This maintains an active session without a browser process, but cannot restore a revoked session: re-import when rejected. Native SABR audio and optional official-browser PO generation are available; protected playback uses the official page and its licensed browser CDM. See [Web delivery](docs/web-delivery.md) for setup and boundaries. If Google requires additional attestation or changes the player layout, the core reports an error instead of switching to another client.
 
 ## Rust library
 
@@ -236,7 +238,7 @@ thread, and always destroy the operation handle. The deadline starts at
 allocation and includes queue waits. `ytmusic_client_select_account` also takes
 an operation and returns a new verified client handle. The .NET wrapper connects
 native cancellation to `CancellationToken`. `ytmusic_capabilities()` reports
-protocol 1.1 / ABI 2 and limits without creating a client or making a request.
+protocol 1.2 / ABI 2 and limits without creating a client or making a request.
 
 The CLI's `call` command accepts the inner `request` object; the C ABI accepts the wrapper with optional `config`. Account operations are `{"op":"auth_status"}`, `{"op":"account"}`, and `{"op":"library","section":"playlists","continuation":null}`. The C host supplies browser `cookie`, `auth_user`, and optional `delegated_session_id` in `config` from its own secure store; the library does not implicitly load CLI profiles.
 

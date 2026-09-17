@@ -202,3 +202,38 @@ fn invalid_mutations_fail_before_bootstrap_and_hide_opaque_values() {
         assert!(!output.contains("private-"));
     }
 }
+
+#[test]
+fn official_playback_is_local_and_stateful_delivery_rejects_one_shot_calls() {
+    let result: Value = serde_json::from_str(&core_call(
+        &json!({"config":{"proxy":"http://127.0.0.1:1"},
+        "request":{"op":"official_playback","video_id":"4D7u5KF7SP8"}})
+        .to_string(),
+    ))
+    .unwrap();
+    assert_eq!(result["ok"], true);
+    assert_eq!(
+        result["data"]["official_watch_url"],
+        "https://music.youtube.com/watch?v=4D7u5KF7SP8"
+    );
+    for request in [
+        json!({"op":"sabr_open","video_id":"4D7u5KF7SP8"}),
+        json!({"op":"sabr_read","handle":1}),
+        json!({"op":"set_po_tokens","tokens":[]}),
+    ] {
+        let result: Value = serde_json::from_str(&core_call(
+            &json!({"config":{"proxy":"http://127.0.0.1:1"},"request":request}).to_string(),
+        ))
+        .unwrap();
+        assert_eq!(result["error"]["code"], "invalid_input");
+    }
+}
+
+#[test]
+fn encrypted_audio_is_never_exposed_as_a_clear_direct_stream() {
+    let raw = json!({"playabilityStatus":{"status":"OK"},"videoDetails":{"videoId":"4D7u5KF7SP8","title":"Fixture"},
+        "streamingData":{"adaptiveFormats":[{"itag":140,"mimeType":"audio/mp4","url":"https://r1.googlevideo.com/videoplayback","drmFamilies":["WIDEVINE"]}]}});
+    let player = youtube_music_core::parse::player(&raw).unwrap();
+    assert!(player.audio_streams.is_empty());
+    assert_eq!(player.drm.unwrap().encrypted_audio_formats, 1);
+}

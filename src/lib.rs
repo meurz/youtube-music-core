@@ -1,8 +1,12 @@
 //! Native, blocking YouTube Music client. No browser, Python, or yt-dlp runtime.
+pub mod attestation;
+mod attestation_client;
 pub mod auth;
 mod client;
 mod decipher;
+pub mod delivery;
 pub mod discovery;
+pub mod drm;
 mod error;
 mod ffi;
 pub mod library;
@@ -12,6 +16,7 @@ pub mod mutations;
 pub mod operation;
 pub mod parse;
 mod playback;
+pub mod sabr;
 mod session;
 mod transport;
 pub use playback::PlaybackWarmup;
@@ -25,6 +30,30 @@ use serde_json::{json, Value};
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
     Capabilities,
+    OfficialPlayback {
+        video_id: String,
+    },
+    SetPoTokens {
+        tokens: Vec<attestation::PoTokenBundle>,
+    },
+    AttestationContext {
+        video_id: String,
+    },
+    SabrOpen {
+        video_id: String,
+        #[serde(default)]
+        format: model::AudioFormat,
+    },
+    SabrRead {
+        handle: u64,
+    },
+    SabrSeek {
+        handle: u64,
+        position_ms: u64,
+    },
+    SabrClose {
+        handle: u64,
+    },
     Accounts,
     SearchSuggestions {
         query: String,
@@ -152,6 +181,26 @@ impl Request {
     pub fn validate(&self) -> Result<()> {
         match self {
             Self::Accounts => Ok(()),
+            Self::SetPoTokens { tokens } => {
+                if tokens.len() > 16 {
+                    return Err(Error::InvalidInput(
+                        "at most 16 PO token bundles are allowed".into(),
+                    ));
+                }
+                tokens.iter().try_for_each(|token| token.validate())
+            }
+            Self::OfficialPlayback { video_id }
+            | Self::SabrOpen { video_id, .. }
+            | Self::AttestationContext { video_id } => client::validate_video_id(video_id),
+            Self::SabrRead { handle }
+            | Self::SabrSeek { handle, .. }
+            | Self::SabrClose { handle } => {
+                if *handle == 0 {
+                    Err(Error::InvalidInput("invalid SABR handle".into()))
+                } else {
+                    Ok(())
+                }
+            }
             Self::SearchSuggestions { query } => client::nonempty(query, "query"),
             Self::Home {
                 params,
@@ -225,6 +274,29 @@ impl MusicClient {
         request.validate()?;
         let value = match request {
             Request::Accounts => serde_json::to_value(self.accounts()?),
+            Request::SetPoTokens { tokens } => {
+                self.set_po_tokens(tokens)?;
+                Ok(json!({"updated":true}))
+            }
+            Request::AttestationContext { video_id } => Ok(self.attestation_context(&video_id)?),
+            Request::OfficialPlayback { video_id } => {
+                serde_json::to_value(drm::DrmPlayback::official(&video_id)?)
+            }
+            Request::SabrOpen { video_id, format } => {
+                serde_json::to_value(self.sabr_open(&video_id, format)?)
+            }
+            Request::SabrRead { handle } => serde_json::to_value(self.sabr_read_json(handle)?),
+            Request::SabrSeek {
+                handle,
+                position_ms,
+            } => {
+                self.sabr_seek(handle, position_ms)?;
+                Ok(json!({"seeked":true}))
+            }
+            Request::SabrClose { handle } => {
+                self.sabr_close(handle)?;
+                Ok(json!({"closed":true}))
+            }
             Request::SearchSuggestions { query } => {
                 serde_json::to_value(self.search_suggestions(&query)?)
             }
@@ -353,8 +425,24 @@ pub fn core_call(input: &str) -> String {
             })
         })?;
         call.request.validate()?;
+        if matches!(
+            call.request,
+            Request::SabrOpen { .. }
+                | Request::SabrRead { .. }
+                | Request::SabrSeek { .. }
+                | Request::SabrClose { .. }
+                | Request::SetPoTokens { .. }
+        ) {
+            return Err(Error::InvalidInput(
+                "this operation requires a persistent client".into(),
+            ));
+        }
         if matches!(call.request, Request::Capabilities) {
             return Ok(capabilities());
+        }
+        if let Request::OfficialPlayback { video_id } = &call.request {
+            return serde_json::to_value(drm::DrmPlayback::official(video_id)?)
+                .map_err(|_| Error::Protocol("could not serialize official playback".into()));
         }
         MusicClient::new(call.config)?.execute(call.request)
     });
@@ -363,10 +451,10 @@ pub fn core_call(input: &str) -> String {
 
 /// Version/capability discovery is local and contains no session information.
 pub fn capabilities() -> Value {
-    json!({"protocol_version":"1.1", "abi_version":2, "core_version":env!("CARGO_PKG_VERSION"),
+    json!({"protocol_version":"1.2", "abi_version":2, "core_version":env!("CARGO_PKG_VERSION"),
         "client":"WEB_REMIX", "authentication":"browser_cookie",
-        "features":{"cancellation":true,"operation_deadline":true,"progress":true,"read_retries":true,"prewarm":true,"stream_cache":true,"stream_refresh":true,"dash_manifest":true,"library_writes":true,"account_selection":true,"timed_lyrics":"when_provided_by_web"},
-        "operations":["capabilities","auth_status","auth_refresh","account","accounts","library","search","search_suggestions","home","explore","browse","playlist","continue","song","player","stream","stream_refresh","dash_manifest","prewarm","prefetch","playback_reset","queue","queue_context","lyrics","timed_lyrics","rate_song","rate_playlist","edit_library","subscribe","create_playlist","edit_playlist","delete_playlist","add_playlist_items","remove_playlist_items","move_playlist_item"],
-        "limits":{"prefetch_tracks":3,"operation_timeout_ms_max":600000,"native_clients":128,"native_operations":256},
-        "unsupported":["po_token_generation","sabr","drm"]})
+        "features":{"cancellation":true,"operation_deadline":true,"progress":true,"read_retries":true,"prewarm":true,"stream_cache":true,"stream_refresh":true,"dash_manifest":true,"po_tokens":true,"po_token_generation":"official_browser","sabr_audio":true,"drm":"official_browser_cdm","library_writes":true,"account_selection":true,"timed_lyrics":"when_provided_by_web"},
+        "operations":["capabilities","attestation_context","set_po_tokens","sabr_open","sabr_read","sabr_seek","sabr_close","official_playback","auth_status","auth_refresh","account","accounts","library","search","search_suggestions","home","explore","browse","playlist","continue","song","player","stream","stream_refresh","dash_manifest","prewarm","prefetch","playback_reset","queue","queue_context","lyrics","timed_lyrics","rate_song","rate_playlist","edit_library","subscribe","create_playlist","edit_playlist","delete_playlist","add_playlist_items","remove_playlist_items","move_playlist_item"],
+        "limits":{"prefetch_tracks":3,"operation_timeout_ms_max":600000,"native_clients":128,"native_operations":256,"sabr_sessions_per_client":4,"po_token_bundles":16},
+        "unsupported":["native_botguard_runtime","native_drm_decryption","live_sabr"]})
 }

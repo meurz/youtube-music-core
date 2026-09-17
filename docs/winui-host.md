@@ -1,6 +1,6 @@
 # Building a WinUI 3 host
 
-Version 0.7 provides the core protocol, session, discovery, library editing and
+Version 0.8 provides the core protocol, session, discovery, library editing and
 playback lifecycle needed by a desktop Music client. It does not include a WinUI
 application or media decoder. Start with the [.NET 8 wrapper](../examples/dotnet/README.md)
 and [C ABI contract](../include/youtube_music_core.h). Ship the native DLL matching
@@ -52,7 +52,7 @@ calls retain ownership until completion. Explicitly cancel their operation
 handles first when shutting down, await workers, and keep the DLL loaded until
 they finish. Legacy ABI entry points remain available but do not expose a
 caller-controlled cancellation handle. `ytmusic_capabilities` and
-`ytmusic_abi_version` let the host check protocol 1.1 / ABI 2 locally.
+`ytmusic_abi_version` let the host check protocol 1.2 / ABI 2 locally.
 
 Use a request generation in the host as well as cancellation, so a successful
 result racing with a track change cannot replace the newly selected song.
@@ -132,6 +132,9 @@ reconcile before retrying. Uncertain failures after dispatch return
 `mutation_outcome_unknown`, `retryable:false`, and the underlying `cause_code`. In particular, never automatically replay a
 playlist create or append merely because a request timed out.
 
-PO-token generation, SABR delivery and DRM are unsupported. Those upstream
-requirements produce explicit failures rather than a different client identity.
+Native SABR audio, optional official-browser attestation, and licensed official-page
+DRM playback are available through the [Web delivery interfaces](web-delivery.md).
+The [WebView2 helper](../examples/dotnet/web-player/README.md) probes actual CDM
+support and leaves license acquisition to the official player. Native SABR returns
+media segments and needs a compatible host demuxer for progressive playback.
 See the [protocol reference](protocol.md) for complete request shapes.
