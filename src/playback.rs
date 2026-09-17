@@ -182,6 +182,9 @@ fn collect_audio(raw: &Value) -> Result<Vec<PendingAudio>> {
         .flatten()
         .enumerate()
     {
+        if crate::drm::is_encrypted_format(format) {
+            continue;
+        }
         if !format["mimeType"]
             .as_str()
             .is_some_and(|m| m.starts_with("audio/"))
@@ -249,9 +252,19 @@ fn resolve_web_urls(raw: &mut Value, script: &str) -> Result<()> {
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
+    let mut sabr_url = raw["streamingData"]["serverAbrStreamingUrl"]
+        .as_str()
+        .map(media_url)
+        .transpose()?;
+    let sabr_n = sabr_url
+        .as_ref()
+        .map(|url| only_query_value(url, "n"))
+        .transpose()?
+        .flatten();
     let n_values: Vec<String> = pending
         .iter()
         .filter_map(|p| p.n.clone())
+        .chain(sabr_n.clone())
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
@@ -259,6 +272,14 @@ fn resolve_web_urls(raw: &mut Value, script: &str) -> Result<()> {
         return Ok(());
     }
     let solved = crate::decipher::solve(script, &signatures, &n_values)?;
+    if let (Some(url), Some(n)) = (&mut sabr_url, sabr_n) {
+        let decoded = solved
+            .n_values
+            .get(&n)
+            .ok_or_else(|| Error::Protocol("Web SABR challenge resolution failed".into()))?;
+        replace_query(url, "n", decoded);
+        raw["streamingData"]["serverAbrStreamingUrl"] = url.as_str().into();
+    }
     for mut audio in pending {
         if let Some((sp, signature)) = audio.signature {
             let decoded = solved
@@ -398,20 +419,50 @@ impl MusicClient {
     }
 
     fn player_once(&self, video_id: &str) -> Result<(Player, u64)> {
+        self.player_once_with_reload(video_id, None)
+    }
+    pub(crate) fn player_with_reload(&self, video_id: &str, reload_token: &str) -> Result<Player> {
+        validate_video_id(video_id)?;
+        if reload_token.is_empty() || reload_token.len() > 65536 {
+            return Err(Error::Protocol("invalid SABR reload context".into()));
+        }
+        self.player_once_with_reload(video_id, Some(reload_token))
+            .map(|(player, _)| player)
+    }
+    fn player_once_with_reload(
+        &self,
+        video_id: &str,
+        reload_token: Option<&str>,
+    ) -> Result<(Player, u64)> {
         crate::operation::check()?;
         let script = self.web_player_script(Some(video_id))?;
         let mut body = json!({"videoId":video_id,"contentCheckOk":true,"racyCheckOk":true,
             "playbackContext":{"contentPlaybackContext":{"signatureTimestamp":script.timestamp,"html5Preference":"HTML5_PREF_WANTS"}}});
-        if let Some(token) = &self.config.po_token {
+        if let Some(token) = self
+            .po_token_for(video_id, crate::attestation::PoTokenContext::Player)?
+            .or_else(|| self.config.po_token.clone())
+        {
             body["serviceIntegrityDimensions"] = json!({"poToken":token});
+        }
+        if let Some(token) = reload_token {
+            body["playbackContext"]["reloadPlaybackContext"] =
+                json!({"reloadPlaybackParams":{"token":token}});
         }
         crate::operation::phase("requesting_stream");
         let raw = self.post("player", body)?;
         crate::operation::phase("resolving_stream");
-        Ok((
-            parse_web_player(raw, &script.source, video_id)?,
-            script.generation,
-        ))
+        let mut player = parse_web_player(raw, &script.source, video_id)?;
+        if let Some((token, token_expiry)) =
+            self.po_token_with_expiry(video_id, crate::attestation::PoTokenContext::Gvs)?
+        {
+            for audio in &mut player.audio_streams {
+                let mut url = media_url(&audio.url)?;
+                replace_query(&mut url, "pot", &token);
+                audio.url = url.into();
+                audio.expires_at = audio.expires_at.map(|expiry| expiry.min(token_expiry));
+            }
+        }
+        Ok((player, script.generation))
     }
 
     /// Inspect the Web player and resolve signature/n challenges without CDN probing.
@@ -590,6 +641,12 @@ fn select_verified(
         });
     }
     if player.audio_streams.is_empty() {
+        if player.sabr.is_some() {
+            return Err(Error::SabrRequired);
+        }
+        if player.drm.is_some() {
+            return Err(Error::DrmRequired);
+        }
         return Err(player
             .resolution_error
             .map(Error::StreamUnavailable)
@@ -619,7 +676,7 @@ fn select_verified(
     Err(Error::MediaValidation(errors.join("; ")))
 }
 
-fn media_url(raw: &str) -> Result<Url> {
+pub(crate) fn media_url(raw: &str) -> Result<Url> {
     let url = Url::parse(raw).map_err(|_| Error::MediaValidation("invalid media URL".into()))?;
     let allowed = url
         .host_str()

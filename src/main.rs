@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::{
-    io::{self, Read},
+    io::{self, Read, Write},
     path::PathBuf,
 };
 use youtube_music_core::{
@@ -37,6 +37,9 @@ struct Cli {
     timeout_ms: u64,
     #[command(subcommand)]
     command: Command,
+    /// Generate fresh Proof of Origin tokens in a signed-in official Music browser tab.
+    #[arg(long, global = true)]
+    attestation_browser_port: Option<u16>,
 }
 
 #[derive(Subcommand)]
@@ -67,6 +70,16 @@ enum Command {
     TimedLyrics { video_id: String },
     /// Generate a DASH manifest for unchanged Web AAC audio (Windows adaptive playback).
     DashManifest { video_id: String },
+    /// Read native SABR audio into a new file; emits unchanged init and media segments.
+    Sabr {
+        video_id: String,
+        #[arg(long)]
+        output: PathBuf,
+        #[arg(long, value_enum, default_value = "webm")]
+        format: youtube_music_core::model::AudioFormat,
+    },
+    /// Describe the official browser playback route, including licensed DRM playback.
+    OfficialPlayback { video_id: String },
     /// Browser login guidance, verified session import, status, and local logout.
     Auth {
         #[command(subcommand)]
@@ -167,6 +180,7 @@ fn read_config(cli: &Cli) -> youtube_music_core::Result<Config> {
                     "oauth",
                     "music_oauth",
                     "po_token",
+                    "po_tokens",
                     "visitor_data",
                     "auth_user",
                     "delegated_session_id",
@@ -194,6 +208,9 @@ fn read_config(cli: &Cli) -> youtube_music_core::Result<Config> {
                     "cookie_expirations",
                     "oauth",
                     "music_oauth",
+                    "po_token",
+                    "po_tokens",
+                    "visitor_data",
                     "auth_user",
                     "delegated_session_id",
                 ] {
@@ -383,6 +400,15 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
         Command::DashManifest { video_id } => Request::DashManifest {
             video_id: video_id.clone(),
         },
+        Command::Sabr {
+            video_id, format, ..
+        } => Request::SabrOpen {
+            video_id: video_id.clone(),
+            format: *format,
+        },
+        Command::OfficialPlayback { video_id } => Request::OfficialPlayback {
+            video_id: video_id.clone(),
+        },
         Command::Prewarm => Request::Prewarm,
         Command::Accounts => Request::Accounts,
         Command::Suggestions { query } => Request::SearchSuggestions {
@@ -468,6 +494,22 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
     if matches!(request, Request::Capabilities) {
         return Ok(youtube_music_core::capabilities());
     }
+    if let Request::OfficialPlayback { video_id } = &request {
+        return serde_json::to_value(youtube_music_core::drm::DrmPlayback::official(video_id)?)
+            .map_err(|_| Error::Protocol("could not serialize official playback".into()));
+    }
+    if matches!(cli.command, Command::Call)
+        && matches!(
+            request,
+            Request::SabrOpen { .. }
+                | Request::SabrRead { .. }
+                | Request::SabrSeek { .. }
+                | Request::SabrClose { .. }
+                | Request::SetPoTokens { .. }
+        )
+    {
+        return Err(Error::InvalidInput("this operation needs a persistent library client; use the sabr command for a complete audio transfer".into()));
+    }
     let mut config = read_config(cli)?;
     let store = SessionStore::new(cli.store, &cli.profile)?;
     let mut loaded_session = None;
@@ -475,6 +517,7 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
         config.cookie = None;
         config.cookie_expirations.clear();
         config.po_token = None;
+        config.po_tokens.clear();
         config.visitor_data = None;
         config.auth_user = 0;
         config.delegated_session_id = None;
@@ -498,9 +541,32 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
             return Err(Error::AuthenticationRequired);
         }
     }
+    if let Some(port) = cli.attestation_browser_port {
+        let video_id = match &request {
+            Request::Player { video_id }
+            | Request::Stream { video_id, .. }
+            | Request::StreamRefresh { video_id, .. }
+            | Request::DashManifest { video_id }
+            | Request::SabrOpen { video_id, .. } => video_id,
+            _ => return Err(Error::InvalidInput(
+                "browser attestation requires a player, stream, dash-manifest or SABR open request"
+                    .into(),
+            )),
+        };
+        config.po_tokens = vec![browser::capture_po_token(port, video_id)?];
+    }
     let refresh = matches!(request, Request::AuthRefresh);
     let client = MusicClient::new(config)?;
-    let mut result = client.execute(request)?;
+    let mut result = if let Command::Sabr {
+        video_id,
+        output,
+        format,
+    } = &cli.command
+    {
+        save_sabr(&client, video_id, *format, output)?
+    } else {
+        client.execute(request)?
+    };
     let mut saved = false;
     if result.get("state").and_then(serde_json::Value::as_str) != Some("rejected") {
         if let Some(expected) = loaded_session {
@@ -531,6 +597,56 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
         result["saved"] = saved.into();
     }
     Ok(result)
+}
+
+fn save_sabr(
+    client: &MusicClient,
+    video_id: &str,
+    format: youtube_music_core::model::AudioFormat,
+    output: &std::path::Path,
+) -> youtube_music_core::Result<serde_json::Value> {
+    if output.exists() {
+        return Err(Error::InvalidInput(
+            "output already exists; choose a new file".into(),
+        ));
+    }
+    let parent = output
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."));
+    let mut temp = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|_| Error::InvalidInput("cannot create SABR output file".into()))?;
+    let opened = client.sabr_open(video_id, format)?;
+    let result = (|| {
+        let mut bytes = 0u64;
+        let mut segments = 0u64;
+        loop {
+            let chunk = client.sabr_read(opened.handle)?;
+            if !chunk.data.is_empty() {
+                temp.write_all(&chunk.data)
+                    .map_err(|_| Error::InvalidInput("cannot write SABR output".into()))?;
+                bytes += chunk.data.len() as u64;
+                segments += 1;
+            }
+            if chunk.finished {
+                break;
+            }
+        }
+        temp.as_file()
+            .sync_all()
+            .map_err(|_| Error::InvalidInput("cannot flush SABR output".into()))?;
+        temp.persist_noclobber(output).map_err(|_| {
+            Error::InvalidInput(
+                "cannot publish SABR output without overwriting an existing file".into(),
+            )
+        })?;
+        Ok(
+            serde_json::json!({"video_id":video_id,"itag":opened.itag,"mime_type":opened.mime_type,
+            "duration_ms":opened.duration_ms,"bytes":bytes,"segments":segments,"output":output,"source_client":"WEB_REMIX"}),
+        )
+    })();
+    let _ = client.sabr_close(opened.handle);
+    result
 }
 
 fn main() {

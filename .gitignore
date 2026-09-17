@@ -11,3 +11,6 @@
 /examples/dotnet-smoke/obj/
 /examples/dotnet/windows/bin/
 /examples/dotnet/windows/obj/
+
+/examples/dotnet/web-player/bin/
+/examples/dotnet/web-player/obj/
