@@ -137,4 +137,7 @@ DRM playback are available through the [Web delivery interfaces](web-delivery.md
 The [WebView2 helper](../examples/dotnet/web-player/README.md) probes actual CDM
 support and leaves license acquisition to the official player. Native SABR returns
 media segments and needs a compatible host demuxer for progressive playback.
+The WebView2 route does not satisfy a browser-free native DRM requirement. That
+path remains unimplemented; see the [native DRM investigation](native-drm.md)
+for the platform probes, playback failures and remaining integration requirements.
 See the [protocol reference](protocol.md) for complete request shapes.
