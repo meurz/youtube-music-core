@@ -68,8 +68,8 @@ The core serializes session-bearing requests and applies Set-Cookie only from th
 exact HTTPS Music origin. It accepts applicable root-scoped cookies, validates
 Domain and __Secure-/__Host-/__Http- restrictions, handles Max-Age/Expires and
 deletions, and ignores narrow-path or partitioned updates that cannot safely be
-represented by a request-header import. Existing unrelated duplicate preferences
-are retained. Learned expiry metadata survives serialization; imported request
+represented by a request-header import. Updates to ambiguous duplicate cookie names are ignored; imported request
+ordering is retained. Learned expiry metadata survives serialization; imported request
 headers do not contain expiry dates. Anonymous clients do not accumulate cookies.
 
 Updates are used for subsequent request signing. A host must explicitly obtain

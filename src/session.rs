@@ -177,6 +177,11 @@ impl CookieState {
                 .or_else(|| cookie.expires_datetime().map(|date| date.unix_timestamp()));
             let delete = expiry.is_some_and(|e| e <= now);
             let existing: Vec<_> = pairs.iter().filter(|(key, _)| key == name).collect();
+            // Imported headers omit each cookie's original domain/partition.
+            // Do not guess which same-name cookie a response would replace.
+            if existing.len() > 1 {
+                continue;
+            }
             if (!delete && (existing.len() != 1 || existing[0].1 != cookie.value()))
                 || (delete && !existing.is_empty())
                 || expirations.get(name).copied() != expiry.filter(|_| !delete)
@@ -239,6 +244,7 @@ mod tests {
                     "SAPISID=rotated; Domain=.youtube.com; Path=/; Secure; HttpOnly; Max-Age=60",
                     "SIDCC=; Path=/; Max-Age=0; Expires=Wed, 01 Jan 2098 00:00:00 GMT",
                     "PAST=removed; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+                    "PREF=ambiguous-update; Path=/",
                 ]),
                 100,
             )
