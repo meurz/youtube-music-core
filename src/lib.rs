@@ -1,10 +1,12 @@
 //! Native, blocking YouTube Music client. No browser, Python, or yt-dlp runtime.
+mod android;
 pub mod auth;
 mod client;
 mod error;
 mod ffi;
 pub mod library;
 pub mod model;
+pub mod music_oauth;
 pub mod oauth;
 pub mod parse;
 mod playback;

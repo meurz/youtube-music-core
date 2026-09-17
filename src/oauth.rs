@@ -53,6 +53,7 @@ impl OAuthSession {
     pub fn apply_to(&self, config: &mut Config) -> Result<()> {
         self.validate()?;
         config.cookie = None;
+        config.music_oauth = None;
         config.auth_user = 0;
         config.delegated_session_id = None;
         config.oauth = Some(self.clone());

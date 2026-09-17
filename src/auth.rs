@@ -187,6 +187,7 @@ impl BrowserSession {
     pub fn apply_to(&self, config: &mut Config) -> Result<()> {
         self.validate()?;
         config.oauth = None;
+        config.music_oauth = None;
         config.cookie = Some(self.cookie.clone());
         config.auth_user = self.auth_user;
         config.delegated_session_id = self.delegated_session_id.clone();
@@ -200,18 +201,21 @@ impl BrowserSession {
 pub enum Session {
     Browser(BrowserSession),
     OAuth(crate::oauth::OAuthSession),
+    MusicOAuth(crate::music_oauth::MusicOAuthSession),
 }
 impl Session {
     pub fn validate(&self) -> Result<()> {
         match self {
             Self::Browser(s) => s.validate(),
             Self::OAuth(s) => s.validate(),
+            Self::MusicOAuth(s) => s.validate(),
         }
     }
     pub fn apply_to(&self, config: &mut Config) -> Result<()> {
         match self {
             Self::Browser(s) => s.apply_to(config),
             Self::OAuth(s) => s.apply_to(config),
+            Self::MusicOAuth(s) => s.apply_to(config),
         }
     }
 }
@@ -322,7 +326,7 @@ pub(crate) fn parse_account(value: &Value, config: &Config) -> Result<AccountInf
 
 impl MusicClient {
     pub(crate) fn require_session(&self) -> Result<()> {
-        if self.config.oauth.is_some() {
+        if self.config.oauth.is_some() || self.is_android_music() {
             return Ok(());
         }
         if self
@@ -340,7 +344,7 @@ impl MusicClient {
     /// Verify the selected Music account remotely. Presence of a cookie is not proof.
     pub fn account(&self) -> Result<AccountInfo> {
         self.require_session()?;
-        let endpoint = if self.config.oauth.is_some() {
+        let endpoint = if self.config.oauth.is_some() || self.is_android_music() {
             "account/accounts_list"
         } else {
             "account/account_menu"

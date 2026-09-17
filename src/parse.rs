@@ -164,19 +164,25 @@ fn parse_item(r: &Value) -> Option<Item> {
         .iter()
         .find(|(_, t)| t == "MUSIC_PAGE_TYPE_ALBUM")
         .map(|(l, _)| l.clone());
-    let duration_seconds = duration(&text(&r["lengthText"])).or_else(|| {
-        ["fixedColumns", "flexColumns"].iter().find_map(|key| {
-            r[*key].as_array()?.iter().find_map(|c| {
-                let t = find(c, "text")?;
-                duration(&text(t)).or_else(|| {
-                    t["runs"]
-                        .as_array()?
-                        .iter()
-                        .find_map(|run| duration(run["text"].as_str()?))
+    let duration_seconds = duration(&text(&r["lengthText"]))
+        .or_else(|| {
+            text(&r["subtitle"])
+                .split('•')
+                .find_map(|s| duration(s.trim()))
+        })
+        .or_else(|| {
+            ["fixedColumns", "flexColumns"].iter().find_map(|key| {
+                r[*key].as_array()?.iter().find_map(|c| {
+                    let t = find(c, "text")?;
+                    duration(&text(t)).or_else(|| {
+                        t["runs"]
+                            .as_array()?
+                            .iter()
+                            .find_map(|run| duration(run["text"].as_str()?))
+                    })
                 })
             })
-        })
-    });
+        });
     let explicit = r
         .get("badges")
         .is_some_and(|b| b.to_string().contains("MUSIC_EXPLICIT_BADGE"));

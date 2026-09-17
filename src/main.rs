@@ -389,16 +389,17 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
     if cli.anonymous {
         config.cookie = None;
         config.oauth = None;
+        config.music_oauth = None;
         config.po_token = None;
         config.auth_user = 0;
         config.delegated_session_id = None;
-    } else if config.cookie.is_none() && config.oauth.is_none() {
+    } else if config.cookie.is_none() && config.oauth.is_none() && config.music_oauth.is_none() {
         if let Some(session) = store.load()? {
             session.apply_to(&mut config)?;
             from_store = true;
         }
     }
-    if config.cookie.is_none() && config.oauth.is_none() {
+    if config.cookie.is_none() && config.oauth.is_none() && config.music_oauth.is_none() {
         if matches!(request, Request::AuthStatus) {
             return Ok(serde_json::json!(AuthStatus {
                 state: AuthState::SignedOut,
@@ -411,8 +412,14 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
     }
     let client = MusicClient::new(config)?;
     let previous_oauth = client.oauth_session()?;
+    let previous_music_oauth = client.music_oauth_session()?;
     let result = client.execute(request);
     if from_store {
+        if let Some(session) = client.music_oauth_session()? {
+            if previous_music_oauth.as_ref() != Some(&session) {
+                store.save(&Session::MusicOAuth(session))?;
+            }
+        }
         if let Some(session) = client.oauth_session()? {
             if previous_oauth.as_ref() != Some(&session) {
                 store.save(&Session::OAuth(session))?;

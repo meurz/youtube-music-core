@@ -41,13 +41,29 @@ Using the captured API key or the installed emulator's 6.49.53 client profile di
 | Standard Google authorization-code URL with the Android client, PKCE, and a reverse-client-ID custom URI | Google's authorization error page: `invalid_request`, “Custom scheme URI not allowed.” |
 | Standard authorization URL with the Android client and the legacy out-of-band redirect | Google's authorization error page: `invalid_request`, obsolete security-flow message |
 
-No new consent was requested from the user, and the existing TV grant was not replaced. These probes establish failures for the specific tested flows, not impossibility for all official clients or future protocols. No working official-link-to-Android-session path has been established.
+The existing TV grant was not replaced. These probes establish failures for the specific tested flows, not impossibility for all official clients or future protocols. No working official-link-to-Android-session path has been established.
+
+### Additional link research and unverified-app warning
+
+- The publicly distributed Google Cloud SDK OAuth configuration rejects the YouTube scopes with `restricted_client`. Its device-code request also failed with `invalid_client`.
+- The OAuth Account Manager `v1/issuetoken` endpoint rejected the existing TV refresh token with HTTP 401 and the TV access token with HTTP 403. No TV-to-Music token conversion was demonstrated.
+- Static inspection of the modified **YTMusicUltimate 2.3.1 IPA**, containing Music 6.51.1, found a candidate public client in `GoogleService-Info.plist`. The IPA was not executed or installed. Its modified provenance means the recovered identifiers cannot all be assumed to be original Google configurations.
+- That candidate accepts an authorization-code URL with PKCE and a reverse-client-ID URI callback far enough to display Google's login/consent pages. The user then reported **“Google hasn't verified this app”**, showing developer `yt-woodstock-eng@google.com`. The displayed email is recorded evidence, not sufficient verification of the client or this use of it.
+- The user has not yet confirmed continuing past that warning. No callback, code exchange, refresh token, Android library compatibility, or independent refresh has been verified for this candidate. Opening the authorization page is not evidence that the entire flow works.
+
+The branch now contains experimental Rust PKCE/session handling, Android transport,
+renderer normalization, and playback routing for an explicitly configured native
+session. `auth login` still uses the released TV device flow; there is no production
+native callback handler yet. Anonymous and legacy profiles retain their existing
+routes, so this is not a completed Android-only migration. The experimental modules
+must not be presented as a verified official login or released as the completed
+migration before authentication and end-to-end API tests pass.
 
 ## API coverage with the app token
 
 - `account/accounts_list`: HTTP 200; selected account is represented by `accountItem`. `account/account_menu` returned HTTP 400.
 - Library: 8 playlists, 3 saved songs, 5 library artists, 16 subscriptions, and 13 liked songs; albums returned an explicit empty-state message. Saved songs and library artists now match Music semantics instead of the TV substitutes.
-- `search` and `next`: HTTP 200. Modern search uses `elementRenderer` models such as `musicTopResultCardShelfModel`; Android library items use `musicTwoColumnItemRenderer`. These require parser work before exposing them through the Rust API. A successful HTTP response is not a completed integration.
+- `search` and `next`: HTTP 200. Modern search uses `elementRenderer` models such as `musicTopResultCardShelfModel`; Android library items use `musicTwoColumnItemRenderer`. Experimental normalization has synthetic unit coverage, but parsed live responses and full pagination remain unverified. A successful HTTP response is not a completed integration.
 - `player`, 9.36.50: playable metadata and format descriptions, but media delivery uses `serverAbrStreamingUrl` rather than per-format direct URLs. SABR delivery was not implemented or validated.
 - `player`, installed emulator profile 6.49.53 / SDK 34: returned direct audio URLs. M4A itag 140 and Opus itag 251 each passed a bounded 4 KiB CDN request with HTTP 206. These requests sent no account token to the CDN.
 - Lyrics, parsed search results, real pagination, independent Android-token renewal, and an end-to-end Android-only CLI remain unverified.

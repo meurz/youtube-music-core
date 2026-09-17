@@ -56,7 +56,7 @@ impl MusicClient {
         if explicitly_signed_out(&value) {
             return Err(Error::AuthenticationRejected);
         }
-        if self.config.oauth.is_some() {
+        if self.config.oauth.is_some() || self.is_android_music() {
             let mut page = self.account_page(&value)?;
             for group in &mut page.sections {
                 group
@@ -68,7 +68,7 @@ impl MusicClient {
                 && parse::find(&value, "genericPromoRenderer").is_none()
             {
                 return Err(Error::Protocol(
-                    "TV client did not return this library section".into(),
+                    "account client did not return this library section".into(),
                 ));
             }
             Ok(page)

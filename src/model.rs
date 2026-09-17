@@ -7,6 +7,7 @@ pub enum PlaybackClient {
     #[default]
     Auto,
     AndroidVr,
+    AndroidMusic,
     WebRemix,
 }
 

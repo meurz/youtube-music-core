@@ -19,6 +19,7 @@ fn profiles(mode: PlaybackClient) -> &'static [PlaybackClient] {
     match mode {
         PlaybackClient::Auto => &[PlaybackClient::AndroidVr, PlaybackClient::WebRemix],
         PlaybackClient::AndroidVr => &[PlaybackClient::AndroidVr],
+        PlaybackClient::AndroidMusic => &[PlaybackClient::AndroidMusic],
         PlaybackClient::WebRemix => &[PlaybackClient::WebRemix],
     }
 }
@@ -26,6 +27,7 @@ fn profiles(mode: PlaybackClient) -> &'static [PlaybackClient] {
 fn profile_name(profile: PlaybackClient) -> &'static str {
     match profile {
         PlaybackClient::AndroidVr => "ANDROID_VR",
+        PlaybackClient::AndroidMusic => "ANDROID_MUSIC",
         PlaybackClient::WebRemix => "WEB_REMIX",
         PlaybackClient::Auto => "AUTO",
     }
@@ -66,6 +68,13 @@ fn timestamp(html: &str) -> Option<u64> {
 }
 
 impl MusicClient {
+    fn player_profiles(&self) -> &'static [PlaybackClient] {
+        if self.is_android_music() {
+            &[PlaybackClient::AndroidMusic]
+        } else {
+            profiles(self.config.playback_client)
+        }
+    }
     fn web_timestamp(&self, video_id: &str) -> Result<u64> {
         if let Some(timestamp) = self.signature_timestamp.get() {
             return Ok(*timestamp);
@@ -86,6 +95,12 @@ impl MusicClient {
 
     fn profile_player(&self, video_id: &str, profile: PlaybackClient) -> Result<Player> {
         let raw = match profile {
+            PlaybackClient::AndroidMusic => self.android_post(
+                "player",
+                json!({"videoId":video_id,"contentCheckOk":true,"racyCheckOk":true}),
+                crate::android::AUDIO_VERSION,
+                34,
+            )?,
             PlaybackClient::AndroidVr => {
                 let response = self
                     .http
@@ -119,10 +134,10 @@ impl MusicClient {
             ));
         }
         player.source_client = Some(profile_name(profile).into());
-        let ua = if profile == PlaybackClient::AndroidVr {
-            VR_UA
-        } else {
-            WEB_UA
+        let ua = match profile {
+            PlaybackClient::AndroidVr => VR_UA,
+            PlaybackClient::AndroidMusic => crate::android::AUDIO_UA,
+            _ => WEB_UA,
         };
         for audio in &mut player.audio_streams {
             audio.source_client = player.source_client.clone();
@@ -137,7 +152,7 @@ impl MusicClient {
         validate_video_id(video_id)?;
         let mut fallback: Option<Player> = None;
         let mut errors = Vec::new();
-        for &profile in profiles(self.config.playback_client) {
+        for &profile in self.player_profiles() {
             match self.profile_player(video_id, profile) {
                 Ok(player) => {
                     if player.status == "OK" && !player.audio_streams.is_empty() {
@@ -163,7 +178,7 @@ impl MusicClient {
     pub fn stream_format(&self, video_id: &str, format: AudioFormat) -> Result<AudioStream> {
         validate_video_id(video_id)?;
         let mut errors = Vec::new();
-        for &profile in profiles(self.config.playback_client) {
+        for &profile in self.player_profiles() {
             let result = self.profile_player(video_id, profile).and_then(|player| {
                 select_verified(player, format, |audio| self.probe_audio(audio))
             });

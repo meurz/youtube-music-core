@@ -26,6 +26,7 @@ pub struct Config {
     pub visitor_data: Option<String>,
     pub cookie: Option<String>,
     pub oauth: Option<crate::oauth::OAuthSession>,
+    pub music_oauth: Option<crate::music_oauth::MusicOAuthSession>,
     pub po_token: Option<String>,
     pub proxy: Option<String>,
     pub timeout_seconds: u64,
@@ -43,6 +44,7 @@ impl Default for Config {
             visitor_data: None,
             cookie: None,
             oauth: None,
+            music_oauth: None,
             po_token: None,
             proxy: None,
             timeout_seconds: 30,
@@ -58,6 +60,7 @@ pub struct MusicClient {
     pub(crate) config: Config,
     pub(crate) signature_timestamp: OnceLock<u64>,
     oauth: Mutex<Option<crate::oauth::OAuthSession>>,
+    music_oauth: Mutex<Option<crate::music_oauth::MusicOAuthSession>>,
     tv_version: OnceLock<String>,
 }
 
@@ -135,6 +138,22 @@ impl MusicClient {
     /// Blocking client. Async hosts should call it on a dedicated blocking worker.
     /// Unless client_version is supplied, bootstraps the current web client first.
     pub fn new(mut config: Config) -> Result<Self> {
+        if let Some(session) = &config.music_oauth {
+            session.validate()?;
+            if config.oauth.is_some()
+                || config.cookie.is_some()
+                || config.auth_user != 0
+                || config.delegated_session_id.is_some()
+            {
+                return Err(Error::InvalidInput(
+                    "Music OAuth cannot be combined with other credentials or account overrides"
+                        .into(),
+                ));
+            }
+            if config.client_version.is_none() {
+                config.client_version = Some(crate::android::VERSION.into());
+            }
+        }
         if let Some(oauth) = &config.oauth {
             oauth.validate()?;
             if config.cookie.is_some()
@@ -192,6 +211,7 @@ impl MusicClient {
         Ok(Self {
             http,
             oauth: Mutex::new(config.oauth.clone()),
+            music_oauth: Mutex::new(config.music_oauth.clone()),
             tv_version: OnceLock::new(),
             config,
             signature_timestamp: OnceLock::new(),
@@ -204,6 +224,28 @@ impl MusicClient {
             .lock()
             .map(|session| session.clone())
             .map_err(|_| Error::Protocol("OAuth session lock failed".into()))
+    }
+
+    /// Updated native Music grant for host-owned secure persistence.
+    pub fn music_oauth_session(&self) -> Result<Option<crate::music_oauth::MusicOAuthSession>> {
+        self.music_oauth
+            .lock()
+            .map(|s| s.clone())
+            .map_err(|_| Error::Protocol("Music OAuth session lock failed".into()))
+    }
+
+    pub(crate) fn is_android_music(&self) -> bool {
+        self.config.music_oauth.is_some()
+    }
+
+    pub(crate) fn music_access_token(&self) -> Result<String> {
+        let mut state = self
+            .music_oauth
+            .lock()
+            .map_err(|_| Error::Protocol("Music OAuth session lock failed".into()))?;
+        let s = state.as_mut().ok_or(Error::AuthenticationRequired)?;
+        s.refresh_if_needed(&self.http)?;
+        Ok(s.access_token.clone())
     }
 
     fn oauth_access_token(&self) -> Result<Option<String>> {
@@ -301,6 +343,9 @@ impl MusicClient {
     }
 
     pub(crate) fn account_post(&self, endpoint: &str, body: Value) -> Result<Value> {
+        if self.is_android_music() {
+            return self.post(endpoint, body);
+        }
         if self.config.oauth.is_some() {
             let response = self.tv_request(endpoint, body)?.send().map_err(network)?;
             return serde_json::from_str(&checked_response(response)?)
@@ -310,7 +355,9 @@ impl MusicClient {
     }
 
     pub(crate) fn account_page(&self, value: &Value) -> Result<Page> {
-        if self.config.oauth.is_some() {
+        if self.is_android_music() {
+            crate::android::page(value)
+        } else if self.config.oauth.is_some() {
             parse::tv_page(value)
         } else {
             parse::page(value)
@@ -318,6 +365,17 @@ impl MusicClient {
     }
 
     pub(crate) fn post(&self, endpoint: &str, body: Value) -> Result<Value> {
+        if self.is_android_music() {
+            return self.android_post(
+                endpoint,
+                body,
+                self.config
+                    .client_version
+                    .as_deref()
+                    .unwrap_or(crate::android::VERSION),
+                36,
+            );
+        }
         let response = self.web_request(endpoint, body)?.send().map_err(network)?;
         let value: Value = serde_json::from_str(&checked_response(response)?)
             .map_err(|_| Error::Protocol("API returned invalid JSON".into()))?;
@@ -337,7 +395,8 @@ impl MusicClient {
         if let Some(params) = filter.params() {
             body["params"] = params.into();
         }
-        parse::page(&self.post("search", body)?)
+        let value = self.post("search", body)?;
+        self.catalog_page(&value)
     }
 
     /// A browse ID can identify an album, artist, playlist, or home feed.
@@ -361,7 +420,7 @@ impl MusicClient {
         if matches!(endpoint, ContinuationEndpoint::Browse) {
             self.account_page(&self.account_post(endpoint.as_str(), json!({"continuation":token}))?)
         } else {
-            parse::page(&self.post(endpoint.as_str(), json!({"continuation":token}))?)
+            self.catalog_page(&self.post(endpoint.as_str(), json!({"continuation":token}))?)
         }
     }
 
@@ -383,10 +442,10 @@ impl MusicClient {
                 if let Some(params) = endpoint.get("params") {
                     body["params"] = params.clone();
                 }
-                return parse::page(&self.post("next", body)?);
+                return self.catalog_page(&self.post("next", body)?);
             }
         }
-        parse::page(&next)
+        self.catalog_page(&next)
     }
 
     pub fn song(&self, video_id: &str) -> Result<Track> {
