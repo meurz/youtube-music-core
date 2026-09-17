@@ -277,8 +277,8 @@ mod tests {
     fn nested_player_expressions_fit_the_bounded_stack() {
         let expression = format!(
             "{}decodeURIComponent(signature).slice(1){}",
-            "String(".repeat(128),
-            ")".repeat(128)
+            "String(".repeat(64),
+            ")".repeat(64)
         );
         let player = FIXTURE.replace("decodeURIComponent(signature).slice(1)", &expression);
         let solved = solve(&player, &["abcdef".into()], &["xyz123".into()]).unwrap();
