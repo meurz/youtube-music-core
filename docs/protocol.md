@@ -390,3 +390,11 @@ C ABI entry points and handle semantics remain unchanged. Hosts should check the
 protocol version and advertised operations rather than assume version 1.2's
 removed route is available. See [Web delivery](web-delivery.md) for migration,
 request shapes, token binding and actual validation limits.
+
+
+Version 0.9.1 additionally advertises `anonymous_attestation_context` and
+`features.anonymous_po_tokens` within protocol 2.0 / ABI 2. This operation takes
+`video_id` and returns a sensitive descriptor for a host's anonymous PO provider.
+The existing token bundle shape and authenticated browser operations are
+unchanged. See [anonymous attestation](web-delivery.md#anonymous-host-provided-attestation)
+for visitor ownership, token purposes and retention limits.
