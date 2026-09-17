@@ -78,8 +78,6 @@ enum Command {
         #[arg(long, value_enum, default_value = "webm")]
         format: youtube_music_core::model::AudioFormat,
     },
-    /// Describe the official browser playback route, including licensed DRM playback.
-    OfficialPlayback { video_id: String },
     /// Browser login guidance, verified session import, status, and local logout.
     Auth {
         #[command(subcommand)]
@@ -406,9 +404,6 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
             video_id: video_id.clone(),
             format: *format,
         },
-        Command::OfficialPlayback { video_id } => Request::OfficialPlayback {
-            video_id: video_id.clone(),
-        },
         Command::Prewarm => Request::Prewarm,
         Command::Accounts => Request::Accounts,
         Command::Suggestions { query } => Request::SearchSuggestions {
@@ -493,10 +488,6 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
     request.validate()?;
     if matches!(request, Request::Capabilities) {
         return Ok(youtube_music_core::capabilities());
-    }
-    if let Request::OfficialPlayback { video_id } = &request {
-        return serde_json::to_value(youtube_music_core::drm::DrmPlayback::official(video_id)?)
-            .map_err(|_| Error::Protocol("could not serialize official playback".into()));
     }
     if matches!(cli.command, Command::Call)
         && matches!(

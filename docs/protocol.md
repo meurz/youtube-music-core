@@ -2,7 +2,7 @@
 
 ## Transport
 
-Version 0.8 uses `WEB_REMIX` for every Innertube operation. It does not send TV,
+Version 0.9 uses `WEB_REMIX` for every Innertube operation. It does not send TV,
 Android Music, or Android VR requests, even as a playback fallback. The service is
 YouTube's official Web backend; this library itself is unofficial.
 
@@ -125,8 +125,8 @@ are never forwarded. A successful initial probe does not guarantee full playback
 
 The Web API and player can change upstream. Region/account restrictions or
 additional attestation may block playback. Optional official-browser PO generation,
-native audio-only VOD SABR, and licensed official-page DRM playback are described
-in the [Web delivery contract](web-delivery.md). Native DRM decryption, live SABR,
+and native audio-only VOD SABR are described
+in the [Web delivery contract](web-delivery.md). Live SABR,
 resumable download management and audio decoding are not implemented. Hosts own
 playback, later CDN errors, IP-bound URL handling, seeking and re-resolution.
 API responses are bounded to 16 MiB. Per-request timeouts remain configurable;
@@ -179,7 +179,7 @@ artists from a new process. Rejected sessions failed refresh without changing th
 stored credential. This demonstrates rotation/persistence, not indefinite renewal.
 
 
-## Desktop JSON contract — protocol 1.2 / ABI 2
+## Desktop JSON contract — protocol 2.0 / ABI 2
 
 `ytmusic capabilities`, `ytmusic_capabilities()` and Rust `capabilities()` report
 versions, supported operations and limits without network access or credentials.
@@ -376,12 +376,17 @@ then `dash_manifest` on the same client. Restore the position in the host. The
 manifest shares the verified stream cache lifetime; generating XML alone does
 not extend the URL expiry.
 
-### Web delivery — 0.8
+### Web delivery — 0.9
 
-Protocol 1.2 adds `attestation_context`, `set_po_tokens`, `sabr_open`, `sabr_read`,
-`sabr_seek`, `sabr_close` and `official_playback` without changing ABI 2. `Player`
-now includes optional `sabr` and `drm` descriptors. Encrypted audio never enters
-clear-media candidates. New errors include `po_token_required`, `sabr_required`,
-`sabr_reload_required` and `drm_required`. See [Web delivery](web-delivery.md) for
-request shapes, token binding, host lifetime rules, official-browser dependencies
-and actual validation limits.
+Protocol 2.0 retains `attestation_context`, `set_po_tokens`, `sabr_open`,
+`sabr_read`, `sabr_seek` and `sabr_close`, with ABI 2 unchanged. `Player` includes
+an optional `sabr` descriptor. Unsupported encrypted formats are excluded from
+media candidates. Delivery errors include `po_token_required`, `sabr_required`
+and `sabr_reload_required`.
+
+The former `official_playback` operation, `Player.drm` field, `drm_required` error
+and browser playback helper were removed. This is a JSON/Rust/helper API change;
+C ABI entry points and handle semantics remain unchanged. Hosts should check the
+protocol version and advertised operations rather than assume version 1.2's
+removed route is available. See [Web delivery](web-delivery.md) for migration,
+request shapes, token binding and actual validation limits.

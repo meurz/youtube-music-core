@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace YouTubeMusic.Interop;
 
-public sealed partial class OfficialWebPlayer
+public sealed partial class OfficialBrowserAttestation
 {
     /// <summary>Mint real official-page PO tokens and install them into the same core session.</summary>
     /// <remarks>
@@ -16,7 +16,7 @@ public sealed partial class OfficialWebPlayer
     {
         CheckThread();
         ArgumentNullException.ThrowIfNull(client);
-        _ = OfficialWatchUri(videoId);
+        if (!VideoId().IsMatch(videoId ?? "")) throw new ArgumentException("Invalid video ID", nameof(videoId));
         cancellation.ThrowIfCancellationRequested();
         JsonElement context = await client.CallAsync(JsonSerializer.Serialize(new {
             op = "attestation_context", video_id = videoId

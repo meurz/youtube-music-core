@@ -5,5 +5,5 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
-  <ItemGroup><Compile Remove="windows/**/*.cs;web-player/**/*.cs" /></ItemGroup>
+  <ItemGroup><Compile Remove="windows/**/*.cs;web-attestation/**/*.cs" /></ItemGroup>
 </Project>
