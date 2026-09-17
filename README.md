@@ -2,7 +2,7 @@
 
 Native Rust client for YouTube Music's unofficial Web Innertube API. Includes a reusable blocking library, the `ytmusic` JSON CLI, and a C ABI for native application hosts. Sign in on Google's official website and import the Music browser session; all subsequent API calls and audio resolution run locally without a browser, Node.js, Python, or yt-dlp process.
 
-**Status: experimental 0.5.0.** Search, browsing, accounts, all six library categories, lyrics, queues, and playback use `WEB_REMIX`. Web audio signatures and `n` parameters are resolved by a bounded embedded QuickJS engine using a pinned player parser. No TV, Android, or VR fallback is used. Google can change its private protocol or require additional playback attestation. See [validation and limitations](docs/protocol.md).
+**Status: experimental 0.5.1.** Search, browsing, accounts, all six library categories, lyrics, queues, and playback use `WEB_REMIX`. Web audio signatures and `n` parameters are resolved by a bounded embedded QuickJS engine using a pinned player parser. No TV, Android, or VR fallback is used. Google can change its private protocol or require additional playback attestation. See [validation and limitations](docs/protocol.md).
 
 ## Install
 
@@ -11,7 +11,7 @@ Download an archive for Linux, macOS, or Windows from [Releases](https://github.
 With Rust 1.91 or newer:
 
 ```sh
-cargo install --git https://github.com/meurz/youtube-music-core --tag v0.5.0 --locked
+cargo install --git https://github.com/meurz/youtube-music-core --tag v0.5.1 --locked
 ytmusic search 'Daft Punk Get Lucky' --filter songs --pretty
 ```
 

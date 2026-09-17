@@ -185,13 +185,17 @@ fn evaluate_inner(input: &str, budget: Duration, memory_bytes: usize) -> Result<
                     CaughtError::Exception(exception) => exception.message().unwrap_or_default(),
                     _ => String::new(),
                 };
-                failure(if message.contains("stack overflow") {
-                    "player solver exceeded its stack budget"
-                } else if start.elapsed() >= budget {
-                    "player solver exceeded its time budget"
-                } else {
-                    "player solver failed or exceeded its resource budget"
-                })
+                failure(
+                    if message.contains("stack overflow")
+                        || message.contains("Maximum call stack size exceeded")
+                    {
+                        "player solver exceeded its stack budget"
+                    } else if start.elapsed() >= budget {
+                        "player solver exceeded its time budget"
+                    } else {
+                        "player solver failed or exceeded its resource budget"
+                    },
+                )
             })
     })
 }
@@ -344,7 +348,8 @@ mod tests {
         );
         let input = json!({"type":"preprocessed", "preprocessed_player":
             "function recurse(){return recurse()} recurse()", "requests":[]});
-        assert!(evaluate(&input.to_string(), TIME_BUDGET).is_err());
+        let error = evaluate(&input.to_string(), TIME_BUDGET).unwrap_err();
+        assert!(error.to_string().contains("stack budget"));
     }
 
     #[test]
