@@ -51,11 +51,14 @@ var deadlineConnection = await proxy.NextAsync();
 await Expect<MusicCoreException>(async () => await deadline, e => e.Code == "timeout" && e.Retryable);
 await deadlineConnection.WaitAsync(TimeSpan.FromSeconds(5));
 
+int observerConnected = 0;
 var observerFailure = client.CallAsync("{\"op\":\"prewarm\"}", progress: new Observer(p =>
 {
-    if (p.Phase == "http") throw new ObserverFailure();
+    // Phase names are informational; exercise failure only after real I/O starts.
+    if (Volatile.Read(ref observerConnected) != 0) throw new ObserverFailure();
 }));
 var observerConnection = await proxy.NextAsync();
+Volatile.Write(ref observerConnected, 1);
 await Expect<ObserverFailure>(async () => await observerFailure);
 await observerConnection.WaitAsync(TimeSpan.FromSeconds(5));
 await client.CallAsync("{\"op\":\"capabilities\"}");
@@ -149,7 +152,9 @@ sealed class StallProxy : IAsyncDisposable
                 var stream = client.GetStream();
                 var buffer = new byte[4096];
                 int bytes = await stream.ReadAsync(buffer, stop.Token);
-                if (bytes == 0 || !Encoding.ASCII.GetString(buffer, 0, bytes).StartsWith("CONNECT music.youtube.com:"))
+                string request = Encoding.ASCII.GetString(buffer, 0, bytes);
+                if (!request.StartsWith("CONNECT music.youtube.com:443 ", StringComparison.Ordinal)
+                    && !request.StartsWith("CONNECT www.youtube.com:443 ", StringComparison.Ordinal))
                     throw new Exception("Unexpected proxy target");
                 await arrivals.Writer.WriteAsync(closed.Task, stop.Token);
                 while (await stream.ReadAsync(buffer, stop.Token) != 0) { }

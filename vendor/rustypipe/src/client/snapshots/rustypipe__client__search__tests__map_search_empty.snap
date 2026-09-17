@@ -1,0 +1,14 @@
+---
+source: src/client/search.rs
+expression: map_res.c
+---
+SearchResult(
+  items: Paginator(
+    count: Some(0),
+    items: [],
+    ctoken: None,
+    endpoint: search,
+  ),
+  corrected_query: None,
+  visitor_data: Some("Cgs1Q0NxX3llelBxWSi85ZGaBg%3D%3D"),
+)

@@ -1,5 +1,17 @@
 # Third-party notices
 
+## RustyPipe
+
+This build links the GPL-3.0 RustyPipe library. Source revision, local compatibility
+changes and full license are included under `vendor/rustypipe/`. The combined
+native library and CLI are distributed under GPL-3.0. The original project
+source remains available under the MIT notice in `LICENSE-MIT`; that notice does
+not replace RustyPipe's distribution requirements. Source release archives
+include the locked dependency sources and offline Cargo configuration.
+
+Copyright (c) ThetaDev and RustyPipe contributors.
+
+
 ## GoogleVideo protocol reference
 
 The native SABR/UMP implementation in `src/sabr/` uses the protocol field

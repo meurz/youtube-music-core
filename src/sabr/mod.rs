@@ -1003,55 +1003,7 @@ mod tests {
     #[ignore = "requires a private current WEB_REMIX SABR configuration"]
     fn live_audio_transport() {
         let path = std::env::var("YTMUSIC_SABR_CONFIG").expect("private config path");
-        let config: SabrConfig = if let Ok(root) = std::env::var("YTMUSIC_SABR_RAW_DIR") {
-            let root = std::path::Path::new(&root);
-            let raw: serde_json::Value =
-                serde_json::from_slice(&std::fs::read(root.join("raw-player.json")).unwrap())
-                    .unwrap();
-            let context: serde_json::Value =
-                serde_json::from_slice(&std::fs::read(root.join("context.json")).unwrap()).unwrap();
-            let script = std::fs::read_to_string(root.join("base.js")).unwrap();
-            let mut descriptor = crate::delivery::parse_sabr(&raw, true).unwrap();
-            let mut url = Url::parse(&descriptor.server_abr_streaming_url).unwrap();
-            if let Some(n) = url
-                .query_pairs()
-                .find(|(k, _)| k == "n")
-                .map(|(_, v)| v.into_owned())
-            {
-                let solved =
-                    crate::decipher::solve(&script, &[], std::slice::from_ref(&n)).unwrap();
-                let params: Vec<_> = url
-                    .query_pairs()
-                    .filter(|(k, _)| k != "n")
-                    .map(|(k, v)| (k.into_owned(), v.into_owned()))
-                    .collect();
-                url.set_query(None);
-                url.query_pairs_mut()
-                    .extend_pairs(params)
-                    .append_pair("n", &solved.n_values[&n]);
-            }
-            descriptor.server_abr_streaming_url = url.into();
-            let wanted = std::env::var("YTMUSIC_SABR_ITAG")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(140);
-            let config = SabrConfig {
-                video_id: raw["videoDetails"]["videoId"].as_str().unwrap().into(),
-                server_abr_streaming_url: descriptor.server_abr_streaming_url,
-                ustreamer_config: descriptor.ustreamer_config,
-                client_version: context["client_version"].as_str().unwrap().into(),
-                format: descriptor
-                    .formats
-                    .into_iter()
-                    .find(|f| f.itag == wanted)
-                    .unwrap(),
-                po_token: None,
-            };
-            std::fs::write(&path, serde_json::to_vec(&config).unwrap()).unwrap();
-            config
-        } else {
-            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
-        };
+        let config: SabrConfig = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
         let http = Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(60))

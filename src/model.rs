@@ -41,19 +41,6 @@ pub enum SearchFilter {
     Playlists,
 }
 
-impl SearchFilter {
-    pub(crate) fn params(self) -> Option<&'static str> {
-        match self {
-            Self::All => None,
-            Self::Songs => Some("EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D"),
-            Self::Videos => Some("EgWKAQIQAWoKEAkQChAFEAMQBA%3D%3D"),
-            Self::Albums => Some("EgWKAQIYAWoKEAkQChAFEAMQBA%3D%3D"),
-            Self::Artists => Some("EgWKAQIgAWoKEAkQChAFEAMQBA%3D%3D"),
-            Self::Playlists => Some("EgWKAQIoAWoKEAkQChAFEAMQBA%3D%3D"),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Link {
     pub name: String,

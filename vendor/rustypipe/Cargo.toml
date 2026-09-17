@@ -1,0 +1,136 @@
+[package]
+authors = [ "ThetaDev <thetadev@magenta.de>",]
+categories = [ "api-bindings", "multimedia",]
+description = "Client for the public YouTube / YouTube Music API (Innertube), inspired by NewPipe"
+edition = "2021"
+keywords = [ "youtube", "video", "music",]
+license = "GPL-3.0"
+name = "rustypipe"
+repository = "https://codeberg.org/ThetaDev/rustypipe"
+version = "0.11.4"
+include = [ "/src", "README.md", "CHANGELOG.md", "LICENSE", "!snapshots",]
+
+[features]
+default = [ "default-tls",]
+rss = [ "dep:quick-xml",]
+userdata = []
+default-tls = [ "wreq/rustls-tls-webpki-roots",]
+native-tls = [ "wreq/native-tls",]
+native-tls-alpn = [ "wreq/native-tls-alpn",]
+native-tls-vendored = [ "wreq/native-tls-vendored",]
+rustls-tls-native-roots = [ "wreq/rustls-tls-native-roots",]
+rustls-tls-webpki-roots = [ "wreq/rustls-tls-webpki-roots",]
+
+[dependencies.data-encoding]
+version = "2.0.0"
+
+[dependencies.fancy-regex]
+version = "0.18.0"
+
+[dependencies.flexon]
+version = "=0.4.6"
+default-features = false
+features = [ "simd", "runtime-detection", "serde",]
+
+[dependencies.localzone]
+version = "0.3.1"
+
+[dependencies.once_cell]
+version = "1.12.0"
+
+[dependencies.oxc_allocator]
+version = "0.133.0"
+
+[dependencies.oxc_ast]
+version = "0.133.0"
+
+[dependencies.oxc_parser]
+version = "0.133.0"
+
+[dependencies.oxc_span]
+version = "0.133.0"
+
+[dependencies.phf]
+version = "0.13.1"
+
+[dependencies.quick-xml]
+version = "0.40.1"
+optional = true
+features = [ "serialize",]
+
+[dependencies.rand]
+version = "0.10.1"
+
+[dependencies.regex]
+version = "1.6.0"
+
+[dependencies.ress]
+version = "0.11.0"
+
+[dependencies.rquickjs]
+version = "0.12.0"
+
+[dependencies.serde]
+version = "1.0"
+features = [ "derive",]
+
+[dependencies.serde_json]
+version = "1.0.82"
+
+[dependencies.serde_plain]
+version = "1.0.0"
+
+[dependencies.serde_with]
+version = "3.0.0"
+default-features = false
+features = [ "alloc", "macros",]
+
+[dependencies.sha1]
+version = "0.11.0"
+
+[dependencies.thiserror]
+version = "2.0.0"
+
+[dependencies.time]
+version = "0.3.37"
+features = [ "macros", "serde-human-readable", "serde-well-known", "local-offset",]
+
+[dependencies.tokio]
+version = "1.20.4"
+features = [ "macros", "time", "process",]
+
+[dependencies.tracing]
+version = "0.1.0"
+features = [ "log",]
+
+[dependencies.url]
+version = "2.2.0"
+
+[dependencies.urlencoding]
+version = "2.1.0"
+
+[dependencies.wreq]
+package = "reqwest"
+version = "0.12"
+default-features = false
+features = [ "json", "gzip", "brotli", "socks",]
+
+[dev-dependencies.insta]
+version = "1.17.1"
+features = [ "ron", "redactions",]
+
+[dev-dependencies.path_macro]
+version = "1.0.0"
+
+[dev-dependencies.rstest]
+version = "0.26.1"
+
+[dev-dependencies.tokio-test]
+version = "0.4.2"
+
+[dev-dependencies.tracing-test]
+version = "0.2.5"
+
+[package.metadata.docs.rs]
+features = [ "rss", "userdata",]
+rustdoc-args = [ "--cfg", "docsrs",]

@@ -38,6 +38,9 @@ impl MusicClient {
                 nonempty(token, "continuation")?;
             }
             self.account()?;
+            if let Some(page) = self.upstream_library(section, continuation)? {
+                return Ok(page);
+            }
             let mut body = json!({"browseId":section.browse_id()});
             if let Some(token) = continuation {
                 body["continuation"] = token.into();

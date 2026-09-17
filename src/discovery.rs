@@ -229,31 +229,6 @@ fn parse_discovery(value: &Value) -> Result<DiscoveryPage> {
         filters,
     })
 }
-fn parse_suggestions(value: &Value) -> Result<Vec<SearchSuggestion>> {
-    if !value["contents"].is_array() {
-        return Err(Error::Protocol(
-            "missing search suggestions contents".into(),
-        ));
-    }
-    let mut renderers = Vec::new();
-    collect(value, "searchSuggestionRenderer", &mut renderers);
-    collect(value, "historySuggestionRenderer", &mut renderers);
-    let mut out = Vec::<SearchSuggestion>::new();
-    for renderer in renderers {
-        let query = string(&renderer["navigationEndpoint"]["searchEndpoint"]["query"])
-            .or_else(|| optional_text(&renderer["suggestion"]));
-        if let Some(query) = query {
-            if !out.iter().any(|s| s.query == query) {
-                out.push(SearchSuggestion {
-                    query,
-                    from_history: renderer["icon"]["iconType"] == "HISTORY"
-                        || renderer.get("serviceEndpoint").is_some(),
-                });
-            }
-        }
-    }
-    Ok(out)
-}
 fn tab_browse(value: &Value, lyrics: bool) -> Option<String> {
     let tabs = parse::find(value, "watchNextTabbedResultsRenderer")?["tabs"].as_array()?;
     tabs.iter()
@@ -403,7 +378,7 @@ impl MusicClient {
     pub fn search_suggestions(&self, query: &str) -> Result<Vec<SearchSuggestion>> {
         crate::operation::ensure(|| {
             nonempty(query, "query")?;
-            parse_suggestions(&self.post("music/get_search_suggestions", json!({"input":query}))?)
+            self.upstream_suggestions(query)
         })
     }
     /// Parameters and continuation tokens come from an earlier feed response.
@@ -543,14 +518,6 @@ mod tests {
         assert_eq!(p.continuation.as_deref(), Some("feed"));
         assert_eq!(p.filters.len(), 1);
         assert!(p.filters[0].selected);
-    }
-    #[test]
-    fn suggestions_keep_queries_and_history_without_feedback_tokens() {
-        let v = json!({"contents":[{"searchSuggestionsSectionRenderer":{"contents":[{"searchSuggestionRenderer":{"suggestion":{"runs":[{"text":"daft "},{"text":"punk"}]},"navigationEndpoint":{"searchEndpoint":{"query":"daft punk"}},"icon":{"iconType":"HISTORY"},"serviceEndpoint":{"feedbackEndpoint":{"feedbackToken":"secret"}}}}]}}]});
-        let p = parse_suggestions(&v).unwrap();
-        assert_eq!(p[0].query, "daft punk");
-        assert!(p[0].from_history);
-        assert!(!serde_json::to_string(&p).unwrap().contains("secret"));
     }
     #[test]
     fn queue_roundtrips_context_and_rejects_empty_or_invalid_ids() {

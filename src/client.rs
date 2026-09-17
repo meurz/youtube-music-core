@@ -115,11 +115,12 @@ impl Default for Config {
 
 pub struct MusicClient {
     pub(crate) http: Client,
+    pub(crate) upstream: crate::upstream::Backend,
     pub(crate) config: Config,
     pub(crate) playback: Mutex<crate::playback::PlaybackCache>,
     pub(crate) sabr: Mutex<crate::delivery::Sessions>,
     pub(crate) po_tokens: Mutex<Vec<crate::attestation::PoTokenBundle>>,
-    pub(crate) session: Mutex<crate::session::CookieState>,
+    pub(crate) session: std::sync::Arc<Mutex<crate::session::CookieState>>,
 }
 
 pub(crate) fn network(e: reqwest::Error) -> Error {
@@ -236,10 +237,12 @@ impl MusicClient {
             std::mem::take(&mut config.cookie_expirations),
         )?;
         let po_tokens = std::mem::take(&mut config.po_tokens);
+        let upstream = crate::upstream::Backend::new(&config)?;
         let mut client = Self {
             http,
+            upstream,
             config,
-            session: Mutex::new(session),
+            session: std::sync::Arc::new(Mutex::new(session)),
             playback: Mutex::default(),
             sabr: Mutex::default(),
             po_tokens: Mutex::default(),
@@ -444,12 +447,7 @@ impl MusicClient {
     pub fn search(&self, query: &str, filter: SearchFilter) -> Result<Page> {
         crate::operation::ensure(|| {
             nonempty(query, "query")?;
-            let mut body = json!({"query":query});
-            if let Some(params) = filter.params() {
-                body["params"] = params.into();
-            }
-            let value = self.post("search", body)?;
-            parse::page(&value)
+            self.upstream_search(query, filter)
         })
     }
 
@@ -457,6 +455,10 @@ impl MusicClient {
     pub fn browse(&self, browse_id: &str) -> Result<Page> {
         crate::operation::ensure(|| {
             nonempty(browse_id, "browse_id")?;
+            if let Some(page) = self.upstream_browse(browse_id)? {
+                return Ok(page);
+            }
+            // Home/discovery and Music-only extensions not covered by RustyPipe.
             parse::page(&self.post("browse", json!({"browseId":browse_id}))?)
         })
     }
@@ -476,33 +478,17 @@ impl MusicClient {
     pub fn continue_page(&self, endpoint: ContinuationEndpoint, token: &str) -> Result<Page> {
         crate::operation::ensure(|| {
             nonempty(token, "continuation")?;
+            if let Some(page) = self.upstream_continue(token, endpoint)? {
+                return Ok(page);
+            }
             parse::page(&self.post(endpoint.as_str(), json!({"continuation":token}))?)
         })
     }
 
-    fn next_raw(&self, video_id: &str) -> Result<Value> {
-        validate_video_id(video_id)?;
-        self.post(
-            "next",
-            json!({"videoId":video_id, "enablePersistentPlaylistPanel":true, "isAudioOnly":true}),
-        )
-    }
-
     pub fn queue(&self, video_id: &str) -> Result<Page> {
         crate::operation::ensure(|| {
-            let next = self.next_raw(video_id)?;
-            if let Some(endpoint) = parse::find(&next, "automixPreviewVideoRenderer")
-                .and_then(|v| parse::find(v, "watchPlaylistEndpoint"))
-            {
-                if let Some(playlist_id) = endpoint["playlistId"].as_str() {
-                    let mut body = json!({"videoId":video_id, "playlistId":playlist_id, "isAudioOnly":true, "enablePersistentPlaylistPanel":true});
-                    if let Some(params) = endpoint.get("params") {
-                        body["params"] = params.clone();
-                    }
-                    return parse::page(&self.post("next", body)?);
-                }
-            }
-            parse::page(&next)
+            validate_video_id(video_id)?;
+            self.upstream_queue(video_id)
         })
     }
 
@@ -518,23 +504,8 @@ impl MusicClient {
 
     pub fn lyrics(&self, video_id: &str) -> Result<Lyrics> {
         crate::operation::ensure(|| {
-            let next = self.next_raw(video_id)?;
-            let tabs = parse::find(&next, "watchNextTabbedResultsRenderer")
-                .and_then(|v| v["tabs"].as_array())
-                .ok_or(Error::LyricsUnavailable)?;
-            let id = tabs
-                .iter()
-                .filter(|v| v["tabRenderer"]["unselectable"] != true)
-                .find_map(|v| {
-                    let ep = &v["tabRenderer"]["endpoint"]["browseEndpoint"];
-                    let id = ep["browseId"].as_str()?;
-                    (id.starts_with("MPLY")
-                        || parse::find(ep, "pageType").and_then(Value::as_str)
-                            == Some("MUSIC_PAGE_TYPE_TRACK_LYRICS"))
-                    .then_some(id)
-                })
-                .ok_or(Error::LyricsUnavailable)?;
-            parse::lyrics(&self.post("browse", json!({"browseId":id}))?, id)
+            validate_video_id(video_id)?;
+            self.upstream_lyrics(video_id)
         })
     }
 }

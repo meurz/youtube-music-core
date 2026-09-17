@@ -1,0 +1,480 @@
+---
+source: src/client/video_details.rs
+expression: map_res.c
+---
+VideoDetails(
+  id: "G78AnHpIw5w",
+  name: "The END of Music Machines in Minecraft",
+  description: RichText([
+    Text(
+      text: "What an experience and what a machine. Hope you enjoy!\n\nPatreon ",
+    ),
+    Web(
+      text: "Patreon: jazziired",
+      url: "https://www.patreon.com/jazziiRed",
+    ),
+    Text(
+      text: "\nJoin my Discord server! ",
+    ),
+    Web(
+      text: "Discord: discord",
+      url: "https://discord.gg/q93hyVjqAa",
+    ),
+    Text(
+      text: "\n\n",
+    ),
+    YouTube(
+      text: "\u{202a}@Xoliks97\u{202c}",
+      target: Channel(
+        id: "UCw6yrI8lCjtVIQZhiFE9o6A",
+      ),
+    ),
+    Text(
+      text: " \'s video - ",
+    ),
+    YouTube(
+      text: "Minecraft\'s ONLY 20Hz Music Machine | The ...",
+      target: Video(
+        id: "SSbhQxqi8b8",
+        start_time: 0,
+      ),
+    ),
+    Text(
+      text: "\n",
+    ),
+    YouTube(
+      text: "\u{202a}@vladde\u{202c}",
+      target: Channel(
+        id: "UC2rTBbXG_NwMVgtnSM0ErgQ",
+      ),
+    ),
+    Text(
+      text: " \'s video - ",
+    ),
+    YouTube(
+      text: "Minecraft at 1,200 BPM 🎵",
+      target: Video(
+        id: "XEnk1cvEvII",
+        start_time: 0,
+      ),
+    ),
+    Text(
+      text: "\n",
+    ),
+    YouTube(
+      text: "\u{202a}@mr_mooncatcher\u{202c}",
+      target: Channel(
+        id: "UCYjKR7jn-ESHlDWkoVmaBVQ",
+      ),
+    ),
+    Text(
+      text: " \'s video - ",
+    ),
+    YouTube(
+      text: "MEGALOVANIA in Minecraft (full)",
+      target: Video(
+        id: "TG9kuGmJWaA",
+        start_time: 0,
+      ),
+    ),
+    Text(
+      text: "\n\nWorld Download: ",
+    ),
+    Web(
+      text: "https://github.com/vladdeSV/maestro/r...",
+      url: "https://github.com/vladdeSV/maestro/releases/download/release/MAESTRO.zip",
+    ),
+    Text(
+      text: "\nNBS to Schematic Script: ",
+    ),
+    Web(
+      text: "https://vladdesv.github.io/maestro",
+      url: "https://vladdesv.github.io/maestro",
+    ),
+    Text(
+      text: "\n\nMusic:\nSPECIAL SHOUTOUT to ",
+    ),
+    YouTube(
+      text: "\u{202a}@Kalamity_Music\u{202c}",
+      target: Channel(
+        id: "UC3jnW6reir3xJPJ6y5MqiSg",
+      ),
+    ),
+    Text(
+      text: " for their awesome orchestral arrangement of Sweden (and many more found in their medley) ",
+    ),
+    YouTube(
+      text: "Minecraft - Epic Orchestral Medley (Kalami...",
+      target: Video(
+        id: "Eg264QdKeTI",
+        start_time: 0,
+      ),
+    ),
+    Text(
+      text: "\n\nFluffing a Duck by Kevin MacLeod is licensed under a Creative Commons Attribution 4.0 license. ",
+    ),
+    Web(
+      text: "https://creativecommons.org/licenses/...",
+      url: "https://creativecommons.org/licenses/by/4.0/",
+    ),
+    Text(
+      text: "\n\nInvestigations by Kevin MacLeod is licensed under a Creative Commons Attribution 4.0 license. ",
+    ),
+    Web(
+      text: "https://creativecommons.org/licenses/...",
+      url: "https://creativecommons.org/licenses/by/4.0/",
+    ),
+    Text(
+      text: "\n\nChapters:\n",
+    ),
+    YouTube(
+      text: "00:00",
+      target: Video(
+        id: "G78AnHpIw5w",
+        start_time: 0,
+      ),
+    ),
+    Text(
+      text: " Intro\n",
+    ),
+    YouTube(
+      text: "01:18",
+      target: Video(
+        id: "G78AnHpIw5w",
+        start_time: 78,
+      ),
+    ),
+    Text(
+      text: " A New Hope\n",
+    ),
+    YouTube(
+      text: "02:51",
+      target: Video(
+        id: "G78AnHpIw5w",
+        start_time: 171,
+      ),
+    ),
+    Text(
+      text: " 3 Impossible Problems\n",
+    ),
+    YouTube(
+      text: "04:37",
+      target: Video(
+        id: "G78AnHpIw5w",
+        start_time: 277,
+      ),
+    ),
+    Text(
+      text: " A Different Approach\n",
+    ),
+    YouTube(
+      text: "06:45",
+      target: Video(
+        id: "G78AnHpIw5w",
+        start_time: 405,
+      ),
+    ),
+    Text(
+      text: " How to Spam a Note\n",
+    ),
+    YouTube(
+      text: "07:23",
+      target: Video(
+        id: "G78AnHpIw5w",
+        start_time: 443,
+      ),
+    ),
+    Text(
+      text: " A Quick Lesson on Update Order\n",
+    ),
+    YouTube(
+      text: "08:20",
+      target: Video(
+        id: "G78AnHpIw5w",
+        start_time: 500,
+      ),
+    ),
+    Text(
+      text: " Actual Black Magic\n",
+    ),
+    YouTube(
+      text: "10:10",
+      target: Video(
+        id: "G78AnHpIw5w",
+        start_time: 610,
+      ),
+    ),
+    Text(
+      text: " Please Donate\n",
+    ),
+    YouTube(
+      text: "10:56",
+      target: Video(
+        id: "G78AnHpIw5w",
+        start_time: 656,
+      ),
+    ),
+    Text(
+      text: " Epic Timelapse\n",
+    ),
+    YouTube(
+      text: "13:09",
+      target: Video(
+        id: "G78AnHpIw5w",
+        start_time: 789,
+      ),
+    ),
+    Text(
+      text: " Oops Machine Was Too Good",
+    ),
+  ]),
+  channel: ChannelTag(
+    id: "UCz7mxur_emoA8fl9kvizgtA",
+    name: "jazziiRed",
+    avatar: [
+      Thumbnail(
+        url: "https://yt3.ggpht.com/Oa8d8a2btNL7yE8yHd3TVxRS_7fjrwkavZ1NQ_pNx91doW0H0twCpmCmZMhrUn4r6jJk30bl9Q=s88-c-k-c0x00ffffff-no-rj",
+        width: 0,
+        height: 0,
+      ),
+    ],
+    verification: none,
+    subscriber_count: None,
+  ),
+  collaborators: [
+    ChannelTag(
+      id: "UCz7mxur_emoA8fl9kvizgtA",
+      name: "jazziiRed",
+      avatar: [
+        Thumbnail(
+          url: "https://yt3.ggpht.com/Oa8d8a2btNL7yE8yHd3TVxRS_7fjrwkavZ1NQ_pNx91doW0H0twCpmCmZMhrUn4r6jJk30bl9Q=s88-c-k-c0x00ffffff-no-rj",
+          width: 0,
+          height: 0,
+        ),
+      ],
+      verification: none,
+      subscriber_count: None,
+    ),
+    ChannelTag(
+      id: "UCw6yrI8lCjtVIQZhiFE9o6A",
+      name: "Xoliks",
+      avatar: [
+        Thumbnail(
+          url: "https://yt3.ggpht.com/Oa8d8a2btNL7yE8yHd3TVxRS_7fjrwkavZ1NQ_pNx91doW0H0twCpmCmZMhrUn4r6jJk30bl9Q=s88-c-k-c0x00ffffff-no-rj",
+          width: 0,
+          height: 0,
+        ),
+      ],
+      verification: none,
+      subscriber_count: None,
+    ),
+    ChannelTag(
+      id: "UC2rTBbXG_NwMVgtnSM0ErgQ",
+      name: "vladde",
+      avatar: [
+        Thumbnail(
+          url: "https://yt3.ggpht.com/Oa8d8a2btNL7yE8yHd3TVxRS_7fjrwkavZ1NQ_pNx91doW0H0twCpmCmZMhrUn4r6jJk30bl9Q=s88-c-k-c0x00ffffff-no-rj",
+          width: 0,
+          height: 0,
+        ),
+      ],
+      verification: none,
+      subscriber_count: None,
+    ),
+    ChannelTag(
+      id: "UCYjKR7jn-ESHlDWkoVmaBVQ",
+      name: "mooncatcher",
+      avatar: [
+        Thumbnail(
+          url: "https://yt3.ggpht.com/Oa8d8a2btNL7yE8yHd3TVxRS_7fjrwkavZ1NQ_pNx91doW0H0twCpmCmZMhrUn4r6jJk30bl9Q=s88-c-k-c0x00ffffff-no-rj",
+          width: 0,
+          height: 0,
+        ),
+      ],
+      verification: none,
+      subscriber_count: None,
+    ),
+  ],
+  view_count: "[view_count]",
+  like_count: Some(39476),
+  publish_date: "[date]",
+  publish_date_txt: Some("Premiered Oct 11, 2025"),
+  is_live: false,
+  is_ccommons: false,
+  chapters: [
+    Chapter(
+      name: "Intro",
+      position: 0,
+      thumbnail: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_27866.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLBWXJNXatHBg36ZTLwN2inWh42IJA",
+          width: 168,
+          height: 94,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_27866.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLCb1tn5yRzcbkQeP2RG9iYX0C-fXw",
+          width: 336,
+          height: 188,
+        ),
+      ],
+    ),
+    Chapter(
+      name: "A New Hope",
+      position: 78,
+      thumbnail: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_106100.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLB1S7sdm87txJ018MBXNX-fkClUNg",
+          width: 168,
+          height: 94,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_106100.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLBwXamMAO4gXAGMC6nk5XqcbWtXZg",
+          width: 336,
+          height: 188,
+        ),
+      ],
+    ),
+    Chapter(
+      name: "3 Impossible Problems",
+      position: 171,
+      thumbnail: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_198900.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLD9EDUIRNHxQjHdeoqUkYdUQTVlew",
+          width: 168,
+          height: 94,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_198900.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLBL6gx0xSMihGih3n2c9s-0ZNJ2Lw",
+          width: 336,
+          height: 188,
+        ),
+      ],
+    ),
+    Chapter(
+      name: "A Different Approach",
+      position: 277,
+      thumbnail: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_306833.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLD6m1Wl8kCMm4dlCW6xDZSn_lhIdQ",
+          width: 168,
+          height: 94,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_306833.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLAhIkGBs0zLjmWnhz3WoJd62P4gOQ",
+          width: 336,
+          height: 188,
+        ),
+      ],
+    ),
+    Chapter(
+      name: "How to Spam a Note",
+      position: 405,
+      thumbnail: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_405266.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLAku7gEgItlWHWUUB4Fb14bOdpdVg",
+          width: 168,
+          height: 94,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_405266.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLAmiJu9Q3TMs8lsdMNKQe9sTeSgjA",
+          width: 336,
+          height: 188,
+        ),
+      ],
+    ),
+    Chapter(
+      name: "A Quick Lesson on Update Order",
+      position: 443,
+      thumbnail: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_472200.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLC41q0fVPeE42SntPUd7c4NwkRuxA",
+          width: 168,
+          height: 94,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_472200.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLAG7E6v5_xNqUepaiHZQiFIC8tN-A",
+          width: 336,
+          height: 188,
+        ),
+      ],
+    ),
+    Chapter(
+      name: "Actual Black Magic",
+      position: 500,
+      thumbnail: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_522800.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLCg0ct485U7SifZVTR5QNxlxVFuzw",
+          width: 168,
+          height: 94,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_522800.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLB5Cj1TGrtGaQNHrY_fOEJJBAc99A",
+          width: 336,
+          height: 188,
+        ),
+      ],
+    ),
+    Chapter(
+      name: "Please Donate",
+      position: 610,
+      thumbnail: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_639200.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLC6guB_1PTdo9Cw-qn8TrWvuoQ0yQ",
+          width: 168,
+          height: 94,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_639200.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLCYwSMngKvBo67SOnhOTg4En1ZLFg",
+          width: 336,
+          height: 188,
+        ),
+      ],
+    ),
+    Chapter(
+      name: "Epic Timelapse",
+      position: 656,
+      thumbnail: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_683100.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLDu8k8uD5wZiWCt-lVzU3EoN5HaPA",
+          width: 168,
+          height: 94,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_683100.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLDzpiLF1P_KMfIkDtpPG4XbABD3PQ",
+          width: 336,
+          height: 188,
+        ),
+      ],
+    ),
+    Chapter(
+      name: "Oops Machine Was Too Good",
+      position: 789,
+      thumbnail: [
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_792100.jpg?sqp=-oaymwEbCKgBEF5IVfKriqkDDggBFQAAiEIYAXABwAEG&rs=AOn4CLAUgG2PeQTela14wZ6LkY4MkrzR-w",
+          width: 168,
+          height: 94,
+        ),
+        Thumbnail(
+          url: "https://i.ytimg.com/vi/G78AnHpIw5w/hqdefault_792100.jpg?sqp=-oaymwEcCNACELwBSFXyq4qpAw4IARUAAIhCGAFwAcABBg==&rs=AOn4CLAa_bWY1vcIR396_Js4e3KI_xIOQQ",
+          width: 336,
+          height: 188,
+        ),
+      ],
+    ),
+  ],
+  recommended: "[recommended omitted]",
+  top_comments: Paginator(
+    count: None,
+    items: [],
+    ctoken: Some("Eg0SC0c3OEFuSHBJdzV3GAYyJSIRIgtHNzhBbkhwSXc1dzAAeAJCEGNvbW1lbnRzLXNlY3Rpb24%3D"),
+    endpoint: next,
+  ),
+  latest_comments: Paginator(
+    count: None,
+    items: [],
+    ctoken: Some("Eg0SC0c3OEFuSHBJdzV3GAYyOCIRIgtHNzhBbkhwSXc1dzABeAIwAUIhZW5nYWdlbWVudC1wYW5lbC1jb21tZW50cy1zZWN0aW9u"),
+    endpoint: next,
+  ),
+  visitor_data: None,
+)
