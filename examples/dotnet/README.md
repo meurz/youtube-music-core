@@ -94,6 +94,48 @@ re-resolve on recoverable playback failures, and avoid indefinitely retrying the
 same rejected URL. Never log signed URLs. The WinUI host owns `MediaPlayer`,
 buffering/seek, playback position, queue policy and SMTC/media keys.
 
+## Windows MediaPlayer and AAC
+
+For WinUI's `MediaPlayer`, reference the additional Windows project
+`examples/dotnet/windows/YouTubeMusic.Interop.Windows.csproj` and use
+`WindowsMusicSource`. It targets .NET 8 / Windows 10 SDK 19041 or newer:
+
+```csharp
+using Windows.Media.Playback;
+using YouTubeMusic.Interop;
+
+// Retain both objects for the playback lifetime. Detach before disposing a source.
+using var player = new MediaPlayer();
+using var source = await WindowsMusicSource.CreateAsync(music, "4D7u5KF7SP8",
+    cancellationToken, timeout: TimeSpan.FromSeconds(60));
+player.Source = source.Source;
+player.Play();
+// Await playback/user action in your host. Before leaving this scope:
+player.Source = null;
+```
+
+The helper asks core for `dash_manifest`, loads the generated DASH manifest through
+Windows `AdaptiveMediaSource`, and passes the returned public media headers to
+Windows HTTP. It does not modify audio bytes, download an entire track before
+playing, run a local server, or invoke FFmpeg. `FromManifestAsync` also accepts an
+already resolved `dash_manifest` result; manifests contain signed URLs and must
+not be logged or stored as public assets. Expired descriptors must be re-resolved.
+
+Create a **fresh** `WindowsMusicSource` for each source replacement. Assign the new
+`Source` to the player, then dispose the previous wrapper after it is detached.
+The wrapper owns and disposes its MediaSource, AdaptiveMediaSource, HTTP client and
+manifest stream. Keep it alive while the player uses its `Source`. Cancellation and
+the optional total initialization timeout apply to resolution and Windows source
+creation; after creation, playback cancellation/stop belongs to `MediaPlayer`.
+
+Directly assigning the returned MP4 URL to `MediaSource.CreateFromUri` is not the
+recommended Windows path: the tested official AAC streams use fragmented MP4 with
+an edit list, and Windows' direct-file pipeline immediately reached the end.
+The same original bytes worked through the DASH pipeline, including real playback,
+seeking and rapid source replacement. Direct WebM/Opus URLs also worked on the
+tested Windows installation and completed a full track. Codec availability still
+depends on the target Windows installation; handle its `MediaFailed` events.
+
 ## Account selection and secure persistence
 
 Read `{"op":"accounts"}`, display the returned choices, and serialize the chosen

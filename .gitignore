@@ -9,3 +9,5 @@
 
 /examples/dotnet-smoke/bin/
 /examples/dotnet-smoke/obj/
+/examples/dotnet/windows/bin/
+/examples/dotnet/windows/obj/
