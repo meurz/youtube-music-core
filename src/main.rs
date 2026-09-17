@@ -65,6 +65,8 @@ enum Command {
     },
     /// Return time-aligned lyrics only when supplied by Web, otherwise plain text.
     TimedLyrics { video_id: String },
+    /// Generate a DASH manifest for unchanged Web AAC audio (Windows adaptive playback).
+    DashManifest { video_id: String },
     /// Browser login guidance, verified session import, status, and local logout.
     Auth {
         #[command(subcommand)]
@@ -378,6 +380,9 @@ fn run(cli: &Cli) -> youtube_music_core::Result<serde_json::Value> {
     }
     let request = match &cli.command {
         Command::Capabilities => return Ok(youtube_music_core::capabilities()),
+        Command::DashManifest { video_id } => Request::DashManifest {
+            video_id: video_id.clone(),
+        },
         Command::Prewarm => Request::Prewarm,
         Command::Accounts => Request::Accounts,
         Command::Suggestions { query } => Request::SearchSuggestions {

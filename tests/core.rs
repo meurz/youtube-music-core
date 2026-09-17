@@ -162,6 +162,7 @@ fn new_protocol_requests_accept_documented_flat_fields_and_reject_extras() {
         r#"{"op":"edit_playlist","playlist_id":"PLfixture","title":"Renamed"}"#,
         r#"{"op":"queue_context","video_id":"4D7u5KF7SP8"}"#,
         r#"{"op":"home","params":"opaque"}"#,
+        r#"{"op":"dash_manifest","video_id":"4D7u5KF7SP8"}"#,
         r#"{"op":"rate_song","video_id":"4D7u5KF7SP8","rating":"like"}"#,
     ] {
         let request: youtube_music_core::Request = serde_json::from_str(source).unwrap();

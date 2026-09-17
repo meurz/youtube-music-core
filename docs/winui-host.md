@@ -62,13 +62,19 @@ result racing with a track change cannot replace the newly selected song.
 1. On an idle worker, call `{"op":"prewarm"}` to download and actually prepare
    the official player. First preparation can still take tens of seconds; expose
    its progress and let foreground playback cancel unneeded background work.
-2. Resolve the current song with `{"op":"stream","video_id":"…","format":"mp4"}`.
-   Pass the returned URL and `http_headers` to MediaPlayer. M4A is the recommended
-   first Windows path; test Opus/WebM on the Windows versions you support.
+2. Resolve AAC with `{"op":"dash_manifest","video_id":"…"}`. Pass its MPD and
+   `http_headers` to Windows `AdaptiveMediaSource`, then create a `MediaSource`
+   for `MediaPlayer`. See the [Windows helper](../examples/dotnet/windows/).
+   The manifest describes the original Web media bytes; no remux, local server
+   or external runtime is needed. Create a fresh adaptive source for each source
+   replacement. Direct WebM/Opus via `stream` with `format:"webm"` is another
+   tested path. Raw M4A URI playback is not recommended: Windows prematurely
+   ended the tested fragmented MP4 when its edit list was read without DASH.
 3. Schedule `prefetch` for one to three upcoming track IDs. It resolves them
    serially into the same client cache; the core installs no scheduler or timer.
 4. On expiry or a media URL rejection, preserve the seek position and call
-   `stream_refresh`. Replace the source and restore playback state in the host.
+   `stream_refresh` (format `mp4` for AAC), then request a fresh `dash_manifest`.
+   Replace the source and restore playback state in the host.
    `playback_reset` explicitly discards this client's source and URL caches.
 
 Player source expires after six hours. The stream cache holds at most eight

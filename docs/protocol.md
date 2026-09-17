@@ -195,6 +195,7 @@ supported. Unknown fields are rejected. `queue_context`, `create_playlist` and
 | `home`, `explore` | Optional `params`, `continuation`: opaque values from an earlier response |
 | `queue_context` | Optional `video_id`, `playlist_id`, `params`, `index` (unsigned integer), `continuation`, `queue_context_params`; provide a video, playlist or continuation |
 | `timed_lyrics` | `video_id` |
+| `dash_manifest` | `video_id`; returns a verified AAC DASH descriptor for adaptive playback |
 | `stream_refresh` | `video_id`, optional `format`: `any` (default), `mp4`, `webm` |
 | `prefetch` | `video_ids`: one to three IDs; optional `format` as above |
 
@@ -350,3 +351,25 @@ locks and interrupted JavaScript; read-retry tests contrast transient reads with
 unreplayed writes. Artifact and live mutation verification are recorded separately
 as they complete; source support alone does not claim a platform or account's
 full playback behavior.
+
+### Windows adaptive AAC playback
+
+`dash_manifest` returns `manifest` (MPD XML), `mime_type`, `video_id`, `itag`,
+`source_client`, `expires_at`, and `http_headers`. It resolves a verified Web AAC
+stream and uses its inclusive `init_range` / `index_range`, `duration_ms`, sample
+rate and channel count to describe the original media resource with DASH
+`SegmentBase`. Missing or invalid segmentation metadata is an explicit error.
+The manifest contains a signed media URL; do not log it or persist it indefinitely.
+
+For Windows, load the MPD through `AdaptiveMediaSource.CreateFromStreamAsync`
+with the returned public CDN headers, and create a fresh adaptive source on each
+replacement. This preserves original audio bytes and edit lists. Raw fragmented
+M4A URI playback prematurely ended in the tested Windows `MediaPlayer`; using
+standard DASH passed real clock advancement, seek, rapid changes and HTTP404
+failure recovery. Direct WebM also passed a complete track through `MediaEnded`.
+See the compiled [Windows helper](../examples/dotnet/windows/).
+
+To recover an expired AAC URL, call `stream_refresh` with `format:"mp4"` and
+then `dash_manifest` on the same client. Restore the position in the host. The
+manifest shares the verified stream cache lifetime; generating XML alone does
+not extend the URL expiry.

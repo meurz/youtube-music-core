@@ -31,6 +31,7 @@ ytmusic lyrics 4D7u5KF7SP8 --pretty
 ytmusic player 4D7u5KF7SP8 --pretty
 ytmusic stream 4D7u5KF7SP8 --pretty
 ytmusic stream 4D7u5KF7SP8 --format mp4 --pretty
+ytmusic dash-manifest 4D7u5KF7SP8 --pretty
 ```
 
 Search filters: `all`, `songs`, `videos`, `albums`, `artists`, `playlists`.
@@ -109,7 +110,12 @@ The result includes `url`, `itag`, `mime_type`, `bitrate`, `content_length`, `ex
 
 First use analyzes the current player script and can take tens of seconds. Reuse a persistent client and schedule `prewarm` off the UI thread. Player source expires after six hours; up to eight verified streams are cached for five minutes while they have more than 90 seconds of validity left. `prefetch` resolves one to three upcoming tracks, `stream_refresh` bypasses a track’s URL cache, and `playback_reset` invalidates source/URL state. Qualifying stream failures get one fresh bootstrap. Separate CLI processes repeat cold preparation; a one-shot `ytmusic prewarm` does not warm another process.
 
-`player` exposes candidate formats without CDN probing; their `verification` field is `null`. Use `stream` when handing a URL to a player. This release was tested with real Opus and M4A CDN responses and one-second audio decoding; FFmpeg was used for validation only and is not a runtime dependency.
+`player` exposes candidate formats without CDN probing; their `verification` field is `null`. Use `stream` when handing a URL to a player. For Windows AAC playback, use `dash_manifest` with `AdaptiveMediaSource` as shown
+in the [WinUI guide](docs/winui-host.md); raw fragmented M4A URI playback ended
+prematurely in the tested Windows player. The MPD retains the original media
+bytes and encoder edit list. Direct WebM/Opus passed actual Windows playback,
+seek, rapid source switching, HTTP failure recovery and a full track through
+`MediaEnded`. No FFmpeg or local proxy is a runtime dependency.
 
 Send a request through stdin:
 

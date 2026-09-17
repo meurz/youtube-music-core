@@ -6,6 +6,7 @@ pub mod discovery;
 mod error;
 mod ffi;
 pub mod library;
+pub mod manifest;
 pub mod model;
 pub mod mutations;
 pub mod operation;
@@ -45,6 +46,9 @@ pub enum Request {
         context: discovery::QueueContext,
     },
     TimedLyrics {
+        video_id: String,
+    },
+    DashManifest {
         video_id: String,
     },
     Prewarm,
@@ -165,7 +169,9 @@ impl Request {
                 Ok(())
             }
             Self::QueueContext { context } => context.validate(),
-            Self::TimedLyrics { video_id } => client::validate_video_id(video_id),
+            Self::TimedLyrics { video_id } | Self::DashManifest { video_id } => {
+                client::validate_video_id(video_id)
+            }
             Self::Capabilities
             | Self::Prewarm
             | Self::PlaybackReset
@@ -235,6 +241,9 @@ impl MusicClient {
             }
             Request::TimedLyrics { video_id } => {
                 serde_json::to_value(self.timed_lyrics(&video_id)?)
+            }
+            Request::DashManifest { video_id } => {
+                serde_json::to_value(self.dash_manifest(&video_id)?)
             }
             Request::Capabilities => Ok(capabilities()),
             Request::Prewarm => serde_json::to_value(self.prewarm()?),
@@ -356,8 +365,8 @@ pub fn core_call(input: &str) -> String {
 pub fn capabilities() -> Value {
     json!({"protocol_version":"1.1", "abi_version":2, "core_version":env!("CARGO_PKG_VERSION"),
         "client":"WEB_REMIX", "authentication":"browser_cookie",
-        "features":{"cancellation":true,"operation_deadline":true,"progress":true,"read_retries":true,"prewarm":true,"stream_cache":true,"stream_refresh":true,"library_writes":true,"account_selection":true,"timed_lyrics":"when_provided_by_web"},
-        "operations":["capabilities","auth_status","auth_refresh","account","accounts","library","search","search_suggestions","home","explore","browse","playlist","continue","song","player","stream","stream_refresh","prewarm","prefetch","playback_reset","queue","queue_context","lyrics","timed_lyrics","rate_song","rate_playlist","edit_library","subscribe","create_playlist","edit_playlist","delete_playlist","add_playlist_items","remove_playlist_items","move_playlist_item"],
+        "features":{"cancellation":true,"operation_deadline":true,"progress":true,"read_retries":true,"prewarm":true,"stream_cache":true,"stream_refresh":true,"dash_manifest":true,"library_writes":true,"account_selection":true,"timed_lyrics":"when_provided_by_web"},
+        "operations":["capabilities","auth_status","auth_refresh","account","accounts","library","search","search_suggestions","home","explore","browse","playlist","continue","song","player","stream","stream_refresh","dash_manifest","prewarm","prefetch","playback_reset","queue","queue_context","lyrics","timed_lyrics","rate_song","rate_playlist","edit_library","subscribe","create_playlist","edit_playlist","delete_playlist","add_playlist_items","remove_playlist_items","move_playlist_item"],
         "limits":{"prefetch_tracks":3,"operation_timeout_ms_max":600000,"native_clients":128,"native_operations":256},
         "unsupported":["po_token_generation","sabr","drm"]})
 }

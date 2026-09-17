@@ -30,6 +30,9 @@ jobs:
       - name: Build .NET host example
         if: runner.os == 'Windows'
         run: dotnet build examples/dotnet --configuration Release
+      - name: Build Windows adaptive playback example
+        if: runner.os == 'Windows'
+        run: dotnet build examples/dotnet/windows --configuration Release
       - name: Build Windows release candidate
         if: runner.os == 'Windows'
         run: cargo build --release --locked
